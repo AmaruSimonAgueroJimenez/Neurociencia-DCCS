@@ -374,7 +374,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <div class="cell">
 <details class="code-fold">
 <summary>Código</summary>
-<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(data <span class="sc">%&gt;%</span> <span class="fu">filter</span>(est_label <span class="sc">==</span> <span class="st">"Go"</span>),</span>
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(data <span class="sc">%&gt;%</span> <span class="fu">filter</span>(est_label <span class="sc">==</span> <span class="st">"Go"</span> <span class="sc">&amp;</span> rt <span class="sc">&gt;</span> <span class="dv">0</span>),</span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>       <span class="fu">aes</span>(<span class="at">x =</span> <span class="fu">as.integer</span>(trial_num), <span class="at">y =</span> rt)) <span class="sc">+</span></span>
 <span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stat_summary</span>(<span class="at">fun =</span> mean,      <span class="at">geom =</span> <span class="st">"line"</span>,  <span class="at">size =</span> <span class="fl">0.1</span>) <span class="sc">+</span></span>
 <span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stat_summary</span>(<span class="at">fun.data =</span> mean_cl_normal,</span>
@@ -416,7 +416,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">new_trial_num =</span> <span class="fu">row_number</span>()</span>
 <span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>  ) </span>
 <span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(data <span class="sc">%&gt;%</span> <span class="fu">filter</span>(est_label <span class="sc">==</span> <span class="st">"Go"</span>),</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(data <span class="sc">%&gt;%</span> <span class="fu">filter</span>(est_label <span class="sc">==</span> <span class="st">"Go"</span> <span class="sc">&amp;</span> rt <span class="sc">&gt;</span> <span class="dv">0</span>),</span>
 <span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>       <span class="fu">aes</span>(<span class="at">x =</span> <span class="fu">as.integer</span>(new_trial_num), <span class="at">y =</span> rt)) <span class="sc">+</span></span>
 <span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="fu">aes</span>(<span class="at">group =</span> <span class="fu">interaction</span>(SU,new_trial)), <span class="at">alpha =</span> <span class="fl">0.1</span>) <span class="sc">+</span></span>
 <span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(</span>
@@ -436,7 +436,7 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 </div>
 <details class="code-fold">
 <summary>Código</summary>
-<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(data <span class="sc">%&gt;%</span> <span class="fu">filter</span>(est_label <span class="sc">==</span> <span class="st">"Go"</span>),</span>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(data <span class="sc">%&gt;%</span> <span class="fu">filter</span>(est_label <span class="sc">==</span> <span class="st">"Go"</span> <span class="sc">&amp;</span> rt <span class="sc">&gt;</span> <span class="dv">0</span>),</span>
 <span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>       <span class="fu">aes</span>(<span class="at">x =</span> <span class="fu">as.integer</span>(new_trial_num), <span class="at">y =</span> rt)) <span class="sc">+</span></span>
 <span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>(<span class="fu">aes</span>(<span class="at">group =</span> <span class="fu">interaction</span>(SU,new_trial)), <span class="at">alpha =</span> <span class="fl">0.1</span>) <span class="sc">+</span></span>
 <span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_smooth</span>(<span class="fu">aes</span>(<span class="at">group =</span> SU),<span class="at">method =</span> <span class="st">"lm"</span>, <span class="at">se =</span> <span class="cn">FALSE</span>, <span class="at">color =</span> <span class="st">"blue"</span>, <span class="at">alpha =</span><span class="fl">0.5</span>) <span class="sc">+</span></span>

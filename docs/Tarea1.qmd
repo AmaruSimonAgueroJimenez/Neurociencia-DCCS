@@ -124,7 +124,7 @@ ggplot(data_area, aes(x = trial_num,
   theme_minimal()
 ```
 ```{r}
-ggplot(data %>% filter(est_label == "Go"),
+ggplot(data %>% filter(est_label == "Go" & rt > 0),
        aes(x = as.integer(trial_num), y = rt)) +
   stat_summary(fun = mean,      geom = "line",  size = 0.1) +
   stat_summary(fun.data = mean_cl_normal,
@@ -154,7 +154,7 @@ data <- data %>% group_by(SU) %>%
     new_trial_num = row_number()
   ) 
 
-ggplot(data %>% filter(est_label == "Go"),
+ggplot(data %>% filter(est_label == "Go" & rt > 0),
        aes(x = as.integer(new_trial_num), y = rt)) +
   geom_line(aes(group = interaction(SU,new_trial)), alpha = 0.1) +
   labs(
@@ -165,7 +165,7 @@ ggplot(data %>% filter(est_label == "Go"),
   theme_minimal() +
   facet_wrap(~ SU, scale="free_y")
 
-ggplot(data %>% filter(est_label == "Go"),
+ggplot(data %>% filter(est_label == "Go" & rt > 0),
        aes(x = as.integer(new_trial_num), y = rt)) +
   geom_line(aes(group = interaction(SU,new_trial)), alpha = 0.1) +
   geom_smooth(aes(group = SU),method = "lm", se = FALSE, color = "blue", alpha =0.5) +
