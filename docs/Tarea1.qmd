@@ -71,7 +71,7 @@ data <- data %>%
   mutate(resp_label = ifelse(resp == -99, "No Respuesta", "Respuesta"))
 
 ggplot(data, aes(x = trial_num, fill = est_label, color = est_label)) +
-  geom_histogram(position = "identity", alpha = 0.4, bins = 100) +
+  geom_histogram(position = "identity", alpha = 0.4, bins = 400) +
   labs(title = "Aparición de Go y No Go en la secuencia de ensayos",
        x = "Posición del ensayo (trial_num)",
        y = "Frecuencia",
