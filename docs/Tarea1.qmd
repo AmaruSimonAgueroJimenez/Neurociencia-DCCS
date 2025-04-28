@@ -23,8 +23,8 @@ execute:
   fig-width: 8
   fig-height: 6
 ---
-<img src="logo1.png" style="width: 250px; position:absolute; top:0; left:0; padding:10px;"/>
-<img src="logo2.png" style="width: 400px; position:absolute; top:0; right:0; padding:10px;"/>
+<img src="logo1.png" style="width: 250px; position:relative; top:0; left:0; padding:10px;"/>
+<img src="logo2.png" style="width: 400px; position:relative; top:0; right:0; padding:10px;"/>
 
 # Paquetes necesarios
 
