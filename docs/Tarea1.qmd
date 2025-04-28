@@ -25,3 +25,112 @@ execute:
 ---
 <img src="logo1.png" style="width: 250px; position:absolute; top:0; left:0; padding:10px;"/>
 <img src="logo2.png" style="width: 400px; position:absolute; top:0; right:0; padding:10px;"/>
+
+# Paquetes necesarios
+
+```{r}
+install_and_load <- function(package) {
+  if (!require(package, character.only = TRUE)) {
+    utils::install.packages(package)
+    library(package, character.only = TRUE)
+  }
+}
+
+packages <- c("tidyverse", "runjags", "rjags", "loo", "coda", "lme4", "rstatix","knitr","kableExtra", "scales")
+
+invisible(capture.output(sapply(packages, install_and_load)))
+```
+
+# Datos task Go NoGo
+
+| Variables | Descripción |
+|-----------|-------------|
+| rt        | Reaction time (in milliseconds) |
+| est       | Stimulus type: 1 = Go, 2 = NoGo |
+| resp      | Response, -99 indicates no response |
+| laten     | Onset of stimulus (in milliseconds) |
+| good      | Recording accuracy: 1 = correct, 0 = incorrect |
+| SU        | Participant ID |
+
+## Visualización de los datos
+
+```{r}
+data <- read.table(paste0(gsub("/docs", "", getwd()), "/data/Behavioral_GNG.csv"), header=TRUE, sep=",")
+  
+kable(head(data,10)) %>%
+  kable_styling("striped", full_width = F)
+```
+
+```{r}
+data <- data %>%
+  group_by(SU) %>%
+  arrange(X, .by_group = TRUE) %>%  # Ordena por latencia ascendente dentro de cada sujeto
+  mutate(trial_num = row_number()) %>% 
+  ungroup %>%
+  mutate(est_label = ifelse(est == 1, "Go", "No Go")) %>% 
+  mutate(resp_label = ifelse(resp == -99, "No Respuesta", "Respuesta"))
+
+ggplot(data, aes(x = trial_num, fill = est_label, color = est_label)) +
+  geom_histogram(position = "identity", alpha = 0.4, bins = 100) +
+  labs(title = "Aparición de Go y No Go en la secuencia de ensayos",
+       x = "Posición del ensayo (trial_num)",
+       y = "Frecuencia",
+       fill = "Tipo de ensayo",
+       color = "Tipo de ensayo") +
+  theme_minimal()
+```
+```{r}
+#| eval: false
+#| include: false
+ggplot(data, aes(x = trial_num, fill = resp_label)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~ est_label) +
+  labs(title = "Proporción de respuestas por número de ensayo y tipo",
+       x = "Número de ensayo",
+       y = "Proporción",
+       fill = "Tipo de respuesta") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+```
+```{r}
+# 1) contar y completar combinaciones que falten
+data_area <- data %>%
+  count(trial_num, est_label, resp_label) %>%                  # cuenta n por combinación
+  complete(trial_num, est_label, resp_label, fill = list(n=0)) %>%  # mete los que falten con n=0
+  group_by(trial_num, est_label) %>%
+  mutate(prop = n / sum(n)) %>%                                # calcula proporción
+  ungroup() %>%
+  mutate(trial_num = as.integer(trial_num))                    # fuerza tipo numérico
+
+# 2) dibujar el área apilada
+ggplot(data_area, aes(x = trial_num,
+                      y = prop,
+                      fill = resp_label,
+                      group = resp_label)) +                    # agrupa por categoría
+  geom_area(position = "stack", alpha = 0.7) +                 # apilado explícito
+  facet_wrap(~ est_label)  +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(
+    title = "Proporción de respuestas por número de ensayo y tipo (área)",
+    x     = "Número de ensayo",
+    y     = "Proporción",
+    fill  = "Tipo de respuesta"
+  ) +
+  theme_minimal()
+```
+```{r}
+ggplot(data %>% filter(est_label == "Go"),
+       aes(x = as.integer(trial_num), y = rt)) +
+  stat_summary(fun = mean,      geom = "line",  size = 0.8) +
+  stat_summary(fun.data = mean_cl_normal,
+               geom = "ribbon", alpha = 0.2)  +
+  labs(
+    title = "Tiempo medio de respuesta (Go) por ensayo",
+    x     = "Número de ensayo",
+    y     = "RT medio (ms)"
+  ) +
+  theme_minimal()
+```
+
+
