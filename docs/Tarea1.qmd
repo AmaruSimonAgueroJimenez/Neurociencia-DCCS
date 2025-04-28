@@ -122,7 +122,7 @@ ggplot(data_area, aes(x = trial_num,
 ```{r}
 ggplot(data %>% filter(est_label == "Go"),
        aes(x = as.integer(trial_num), y = rt)) +
-  stat_summary(fun = mean,      geom = "line",  size = 0.8) +
+  stat_summary(fun = mean,      geom = "line",  size = 0.1) +
   stat_summary(fun.data = mean_cl_normal,
                geom = "ribbon", alpha = 0.2)  +
   labs(
