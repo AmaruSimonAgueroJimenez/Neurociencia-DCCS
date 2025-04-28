@@ -1,0 +1,8 @@
+---
+title: "Tarea 1"
+author: "Generación 2025 DCCS"
+format: html
+lang: es
+---
+
+# Quarto
