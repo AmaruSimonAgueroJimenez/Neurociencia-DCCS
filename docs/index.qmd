@@ -1,27 +1,35 @@
 ---
-title: "Tareas"
+title: "Tareas de Neurociencias."
 author: "Generación 2025 DCCS"
-format: html
+date: "`r Sys.Date()`"
 lang: es
+format:
+  html:
+    smooth-scroll: true
+    toc: true
+    toc-depth: 6
+    toc-location: right
+    number-sections: true
+    number-depth: 6
+    code-fold: true
+    bibliography: ref.bib
+    csl: apa-numeric-superscript.csl
+    fig-cap-location: bottom
+#    css: styles.css
+execute:
+  python: true
+  warning: false
+  message: false
+  fig-width: 8
+  fig-height: 6
 ---
+<img src="logo1.png" style="width: 250px; position:absolute; top:0; left:0; padding:10px;"/>
+<img src="logo2.png" style="width: 400px; position:absolute; top:0; right:0; padding:10px;"/>
 
-# Introducción
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea1.html>.
+# Introducción, sobre el repositorio.
 
-## Running Code
+Este repositorio contienen las tareas del ramo de Neurociencias del doctorado en Ciencias de la Complejidad Social, Universidad del Desarrollo, Chile.
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+[Tarea 1](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea1.html).
 
-```{r}
-1 + 1
-```
-
-You can add options to executable code like this
-
-```{r}
-#| echo: false
-2 * 2
-```
-
-The `echo: false` option disables the printing of code (only output is displayed).

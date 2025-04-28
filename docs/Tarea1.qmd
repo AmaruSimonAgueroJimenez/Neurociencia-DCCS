@@ -1,8 +1,27 @@
 ---
 title: "Tarea 1"
 author: "Generación 2025 DCCS"
-format: html
+date: "`r Sys.Date()`"
 lang: es
+format:
+  html:
+    smooth-scroll: true
+    toc: true
+    toc-depth: 6
+    toc-location: right
+    number-sections: true
+    number-depth: 6
+    code-fold: true
+    bibliography: ref.bib
+    csl: apa-numeric-superscript.csl
+    fig-cap-location: bottom
+#    css: styles.css
+execute:
+  python: true
+  warning: false
+  message: false
+  fig-width: 8
+  fig-height: 6
 ---
-
-# Quarto
+<img src="logo1.png" style="width: 250px; position:absolute; top:0; left:0; padding:10px;"/>
+<img src="logo2.png" style="width: 400px; position:absolute; top:0; right:0; padding:10px;"/>
