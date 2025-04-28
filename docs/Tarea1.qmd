@@ -71,12 +71,16 @@ data <- data %>%
   mutate(resp_label = ifelse(resp == -99, "No Respuesta", "Respuesta"))
 
 ggplot(data, aes(x = trial_num, fill = est_label, color = est_label)) +
-  geom_histogram(position = "identity", alpha = 0.4, bins = 400) +
-  labs(title = "Aparición de Go y No Go en la secuencia de ensayos",
-       x = "Posición del ensayo (trial_num)",
-       y = "Frecuencia",
-       fill = "Tipo de ensayo",
-       color = "Tipo de ensayo") +
+  geom_histogram(position = "identity", alpha = 0.1, bins = 400) +
+  scale_fill_manual(values = c("Go" = "green", "No Go" = "red")) +
+  scale_color_manual(values = c("Go" = "green", "No Go" = "red")) +
+  labs(
+    title = "Aparición de Go y No Go en la secuencia de ensayos",
+    x = "Posición del ensayo (trial_num)",
+    y = "Frecuencia",
+    fill = "Tipo de ensayo",
+    color = "Tipo de ensayo"
+  ) +
   theme_minimal()
 ```
 ```{r}
@@ -131,6 +135,47 @@ ggplot(data %>% filter(est_label == "Go"),
     y     = "RT medio (ms)"
   ) +
   theme_minimal()
+```
+# Trial Go-NoGo
+
+```{r}
+data <- data %>% group_by(SU) %>%
+  group_by(SU) %>% 
+  arrange(trial_num) %>% 
+  mutate(
+    new_trial = 1 + cumsum(
+      lag(est_label == "No Go",
+          default = FALSE)
+    )
+  ) %>% 
+  ungroup() %>% 
+  group_by(SU, new_trial) %>% 
+  mutate(
+    new_trial_num = row_number()
+  ) 
+
+ggplot(data %>% filter(est_label == "Go"),
+       aes(x = as.integer(new_trial_num), y = rt)) +
+  geom_line(aes(group = interaction(SU,new_trial)), alpha = 0.1) +
+  labs(
+    title = "Tiempo medio de respuesta (Go) por Trial Go-NoGo",
+    x     = "Número de ensayo por sujeto (Trial Go-NoGo)",
+    y     = "RT medio (ms)"
+  ) +
+  theme_minimal() +
+  facet_wrap(~ SU, scale="free_y")
+
+ggplot(data %>% filter(est_label == "Go"),
+       aes(x = as.integer(new_trial_num), y = rt)) +
+  geom_line(aes(group = interaction(SU,new_trial)), alpha = 0.1) +
+  geom_smooth(aes(group = SU),method = "lm", se = FALSE, color = "blue", alpha =0.5) +
+  labs(
+    title = "Tiempo medio de respuesta (Go) por Trial Go-NoGo",
+    x     = "Número de ensayo por sujeto (Trial Go-NoGo)",
+    y     = "RT medio (ms)"
+  ) +
+  theme_minimal() +
+  facet_wrap(~ SU, scale="free_y")
 ```
 
 
