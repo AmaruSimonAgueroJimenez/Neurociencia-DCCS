@@ -31,5 +31,5 @@ execute:
 
 Este repositorio contienen las tareas del ramo de Neurociencias del doctorado en Ciencias de la Complejidad Social, Universidad del Desarrollo, Chile.
 
-[Tarea 1](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea1.html).
-
+- [Tarea 1](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea1.html).
+- [Tarea 2](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea2.html).

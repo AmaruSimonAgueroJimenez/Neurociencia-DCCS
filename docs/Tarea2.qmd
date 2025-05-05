@@ -1,5 +1,5 @@
 ---
-title: "Tarea 1"
+title: "Tarea 2"
 author: "Generación 2025 DCCS"
 date: "`r Sys.Date()`"
 lang: es
@@ -23,8 +23,8 @@ execute:
   fig-width: 8
   fig-height: 6
 ---
-<img src="logo1.png" style="width: 250px; position:relative; top:0; left:0; padding:10px;"/>
-<img src="logo2.png" style="width: 400px; position:relative; top:0; right:0; padding:10px;"/>
+
+<img src="logo1.png" style="width: 250px; position:relative; top:0; left:0; padding:10px;"/> <img src="logo2.png" style="width: 400px; position:relative; top:0; right:0; padding:10px;"/>
 
 # Paquetes necesarios
 
@@ -41,17 +41,16 @@ packages <- c("tidyverse", "runjags", "rjags", "loo", "coda", "lme4", "rstatix",
 invisible(capture.output(sapply(packages, install_and_load)))
 ```
 
-
 # Datos task Go NoGo
 
-| Variables | Descripción |
-|-----------|-------------|
-| rt        | Reaction time (in milliseconds) |
-| est       | Stimulus type: 1 = Go, 2 = NoGo |
-| resp      | Response, -99 indicates no response |
-| laten     | Onset of stimulus (in milliseconds) |
+| Variables | Descripción                                    |
+|-----------|------------------------------------------------|
+| rt        | Reaction time (in milliseconds)                |
+| est       | Stimulus type: 1 = Go, 2 = NoGo                |
+| resp      | Response, -99 indicates no response            |
+| laten     | Onset of stimulus (in milliseconds)            |
 | good      | Recording accuracy: 1 = correct, 0 = incorrect |
-| SU        | Participant ID |
+| SU        | Participant ID                                 |
 
 ## Visualización de los datos
 
@@ -84,6 +83,7 @@ ggplot(data, aes(x = trial_num, fill = est_label, color = est_label)) +
   ) +
   theme_minimal()
 ```
+
 ```{r}
 #| eval: false
 #| include: false
@@ -97,6 +97,7 @@ ggplot(data, aes(x = trial_num, fill = resp_label)) +
   theme_minimal() +
   scale_fill_brewer(palette = "Set1")
 ```
+
 ```{r}
 # 1) contar y completar combinaciones que falten
 data_area <- data %>%
@@ -124,6 +125,7 @@ ggplot(data_area, aes(x = trial_num,
   ) +
   theme_minimal()
 ```
+
 ```{r}
 ggplot(data %>% filter(est_label == "Go" & rt > 0),
        aes(x = as.integer(trial_num), y = rt)) +
@@ -137,6 +139,7 @@ ggplot(data %>% filter(est_label == "Go" & rt > 0),
   ) +
   theme_minimal()
 ```
+
 # Trial Go-NoGo
 
 ```{r}
@@ -178,6 +181,7 @@ ggplot(data %>% filter(est_label == "Go" & rt > 0),
   theme_minimal() +
   facet_wrap(~ SU, scale="free_y")
 ```
+
 ```{r}
 dat_raw <- read.table(paste0(gsub("/docs", "", getwd()), "/data/Behavioral_GNG.csv"), header=TRUE, sep=",")
 dat <- dat_raw %>% 
@@ -383,6 +387,7 @@ p8 <- p6_dat %>%
                 fill = NA, trim = TRUE, outlier.shape = NA)
 p8
 ```
+
 ```{r}
 ggplot(
   data %>% filter(est_label == "Go" & rt > 0),
@@ -397,6 +402,7 @@ ggplot(
   theme_minimal() +
   facet_wrap(~ SU, scales = "free")
 ```
+
 ```{r}
 ggplot2::ggplot(
   data %>% filter(est_label == "Go" & rt > 0) %>% 
@@ -412,6 +418,7 @@ ggplot2::ggplot(
   ggplot2::theme_minimal() +
   ggplot2::facet_wrap(~ SU, scales = "free_y")
 ```
+
 ```{r}
 ggplot2::ggplot(
   data %>% filter(est_label == "Go" & rt > 0) %>% 
@@ -429,6 +436,92 @@ ggplot2::ggplot(
   ggplot2::facet_wrap(~ SU, scales = "free_y")
 ```
 
+# Estimación del Aprendizaje de la Probabilidad de Go en una Tarea Go/No-Go
+
+## Objetivo
+
+Estimar cómo los sujetos aprenden la probabilidad de aparición del estímulo **Go** (`P(Go)`) en una tarea Go/No-Go, utilizando como variable de interés el **tiempo de respuesta (RT)** a los estímulos Go.
+
+------------------------------------------------------------------------
+
+## 1. Codificación de Estímulos y Respuestas
+
+-   🟢 **Go** → Acción esperada: **Apretar**
+-   🔴 **NoGo** → Acción esperada: **Esperar**
+
+------------------------------------------------------------------------
+
+## 2. Hipótesis del Modelo
+
+Se postula que los sujetos ajustan sus expectativas sobre la probabilidad de aparición del estímulo **Go** a lo largo del tiempo. Esto se refleja conductualmente en los **RT**:
+
+-   Si `P(Go)` ↑ → `RT` ↓\
+-   Si `P(Go)` ↓ → `RT` ↑
+
+------------------------------------------------------------------------
+
+## 3. Modelo de Aprendizaje por Predicción de Error
+
+Los sujetos actualizan una estimación interna de la probabilidad `Q_t` de que aparezca un estímulo **Go** usando una regla tipo Rescorla-Wagner:
+
+$$
+\text{RPE}_t = R_t - Q_t
+$$
+
+$$
+Q_{t+1} = Q_t + \alpha \cdot \text{RPE}_t
+$$
+
+Donde:
+
+-   $R_t$: recompensa observada (1 si Go, 0 si NoGo)
+-   $Q_t$: probabilidad esperada de Go
+-   $\alpha$: tasa de aprendizaje (puede decrecer con el tiempo o mantenerse constante)
+
+------------------------------------------------------------------------
+
+## 4. Política de Elección: Función Softmax
+
+Se modela la probabilidad de emitir una respuesta con una política tipo softmax, que transforma los valores $Q$ en probabilidades de acción:
+
+$$
+P(\text{respuesta}_t = \text{Go}) = \frac{e^{ Q_t/\tau}}{e^{ Q_t/\tau} + e^{ Q_{NoGo}/\tau}}
+$$
 
 
+- $\tau$: parámetro de temperatura (controla la exploración vs. explotación)
+  - Si $\tau \to \infty$: decisiones aleatorias (máxima exploración)
+  - Si $\tau \to 0$: decisiones determinísticas (máxima explotación)
+  
 
+---
+
+## 5. Tiempo de Respuesta como Función del Valor
+
+El tiempo de respuesta ($RT$) se modela como inversamente proporcional a la certeza sobre Go:
+
+$$
+RT_t = f(Q_t), \quad \frac{dRT_t}{dQ_t} < 0
+$$
+
+Opciones funcionales:
+- Lineal: $$ RT_t = a - b \cdot Q_t $$
+- Exponencial: $$ RT_t = a \cdot e^{-b \cdot Q_t} $$
+
+---
+
+## 6. Análisis y Visualización
+
+- Evolución de $Q_t$ y $RT_t$ a través del tiempo
+- Relación entre secuencias previas de Go/NoGo y variaciones de $RT$
+- Curvas de aprendizaje estimadas por sujeto
+- Ajuste del modelo mediante inferencia bayesiana o máxima verosimilitud
+
+---
+
+## 7. Resultado Esperado
+
+- A medida que el sujeto experimenta más estímulos Go, $Q_t$ aumenta, la probabilidad de respuesta también aumenta, y $RT$ disminuye.
+- El modelo permite capturar cómo el sujeto adapta su comportamiento a las contingencias probabilísticas de la tarea.
+
+---
