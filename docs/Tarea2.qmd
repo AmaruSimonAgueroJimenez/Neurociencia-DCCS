@@ -444,14 +444,14 @@ Estimar cómo los sujetos aprenden la probabilidad de aparición del estímulo *
 
 ------------------------------------------------------------------------
 
-## 1. Codificación de Estímulos y Respuestas
+## Codificación de Estímulos y Respuestas
 
 -   🟢 **Go** → Acción esperada: **Apretar**
 -   🔴 **NoGo** → Acción esperada: **Esperar**
 
 ------------------------------------------------------------------------
 
-## 2. Hipótesis del Modelo
+## Hipótesis del Modelo
 
 Se postula que los sujetos ajustan sus expectativas sobre la probabilidad de aparición del estímulo **Go** a lo largo del tiempo. Esto se refleja conductualmente en los **RT**:
 
@@ -460,7 +460,7 @@ Se postula que los sujetos ajustan sus expectativas sobre la probabilidad de apa
 
 ------------------------------------------------------------------------
 
-## 3. Modelo de Aprendizaje por Predicción de Error
+## Modelo de Aprendizaje por Predicción de Error
 
 Los sujetos actualizan una estimación interna de la probabilidad `Q_t` de que aparezca un estímulo **Go** usando una regla tipo Rescorla-Wagner:
 
@@ -480,7 +480,7 @@ Donde:
 
 ------------------------------------------------------------------------
 
-## 4. Política de Elección: Función Softmax
+## Política de Elección: Función Softmax
 
 Se modela la probabilidad de emitir una respuesta con una política tipo softmax, que transforma los valores $Q$ en probabilidades de acción:
 
@@ -488,15 +488,13 @@ $$
 P(\text{respuesta}_t = \text{Go}) = \frac{e^{ Q_t/\tau}}{e^{ Q_t/\tau} + e^{ Q_{NoGo}/\tau}}
 $$
 
+-   $\tau$: parámetro de temperatura (controla la exploración vs. explotación)
+    -   Si $\tau \to \infty$: decisiones aleatorias (máxima exploración)
+    -   Si $\tau \to 0$: decisiones determinísticas (máxima explotación)
 
-- $\tau$: parámetro de temperatura (controla la exploración vs. explotación)
-  - Si $\tau \to \infty$: decisiones aleatorias (máxima exploración)
-  - Si $\tau \to 0$: decisiones determinísticas (máxima explotación)
-  
+------------------------------------------------------------------------
 
----
-
-## 5. Tiempo de Respuesta como Función del Valor
+## Tiempo de Respuesta como Función del Valor
 
 El tiempo de respuesta ($RT$) se modela como inversamente proporcional a la certeza sobre Go:
 
@@ -504,24 +502,60 @@ $$
 RT_t = f(Q_t), \quad \frac{dRT_t}{dQ_t} < 0
 $$
 
-Opciones funcionales:
-- Lineal: $$ RT_t = a - b \cdot Q_t $$
-- Exponencial: $$ RT_t = a \cdot e^{-b \cdot Q_t} $$
+Opciones funcionales: 
+
+- Lineal: $RT_t = a - b \cdot Q_t$ 
+- Exponencial: $RT_t = a \cdot e^{-b \cdot Q_t}$
 
 ---
 
-## 6. Análisis y Visualización
+## Función de Verosimilitud
 
-- Evolución de $Q_t$ y $RT_t$ a través del tiempo
-- Relación entre secuencias previas de Go/NoGo y variaciones de $RT$
-- Curvas de aprendizaje estimadas por sujeto
-- Ajuste del modelo mediante inferencia bayesiana o máxima verosimilitud
+El objetivo es encontrar los parámetros $\alpha$ y $\tau$ que **maximicen la probabilidad** de la secuencia de elecciones observadas:
+
+Para una sola acción en ensayo $t$, la verosimilitud está dada por la política Softmax:
+
+$$
+L_t = P(a_t \mid Q_t, \tau)
+$$
+
+La log-verosimilitud total sobre todos los ensayos es:
+
+$$
+\log L = \sum_t \log P(a_t \mid Q_t, \tau)
+$$
+
+## Procedimiento de Ajuste
+
+1.  Elegir valores candidatos para $\alpha$ y $\tau$
+2.  Inicializar $Q$ a 0.5
+3.  Simular cada ensayo con actualización de $Q$ y cálculo de $P(a)$
+4.  Calcular la log-verosimilitud total
+5.  Optimizar los parámetros con restricciones ($\alpha \in [0,1]$, $\tau > 0$)
 
 ---
 
-## 7. Resultado Esperado
+## Interpretación
 
-- A medida que el sujeto experimenta más estímulos Go, $Q_t$ aumenta, la probabilidad de respuesta también aumenta, y $RT$ disminuye.
-- El modelo permite capturar cómo el sujeto adapta su comportamiento a las contingencias probabilísticas de la tarea.
+-   Si $\alpha = 0$: el agente **no aprende**, los valores $Q$ permanecen constantes.
+-   Si $\alpha > 0$ pero bajo, hay **aprendizaje lento**.
+-   Si $\tau \to \infty$: decisiones aleatorias (máxima exploración)
+-   Si $\tau \to 0$: decisiones determinísticas (máxima explotación)
 
----
+## Análisis y Visualización
+
+Podemos usar simulaciones sobre los datos observados para interpretar si el patrón de RT o de elecciones puede explicarse por este modelo:
+
+-   Evolución de $Q_t$ y $RT_t$ a través del tiempo
+-   Relación entre secuencias previas de Go/NoGo y variaciones de $RT$
+-   Curvas de aprendizaje estimadas por sujeto
+-   Ajuste del modelo mediante inferencia bayesiana o máxima verosimilitud
+
+------------------------------------------------------------------------
+
+## Resultado Esperado
+
+-   A medida que el sujeto experimenta más estímulos Go, $Q_t$ aumenta, la probabilidad de respuesta también aumenta, y $RT$ disminuye.
+-   El modelo permite capturar cómo el sujeto adapta su comportamiento a las contingencias probabilísticas de la tarea.
+
+------------------------------------------------------------------------
