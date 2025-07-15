@@ -33,3 +33,4 @@ Este repositorio contienen las tareas del ramo de Neurociencias del doctorado en
 
 - [Tarea 1](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea1.html).
 - [Tarea 2](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea2.html).
+- [Trabajo final](https://amarusimonaguerojimenez.github.io/Neurociencia-DCCS/Tarea3.html).

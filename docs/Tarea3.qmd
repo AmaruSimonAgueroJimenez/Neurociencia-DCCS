@@ -1,0 +1,543 @@
+---
+title: "Trabajo Final"
+author: "Generación 2025 DCCS"
+date: "`r Sys.Date()`"
+lang: en
+format:
+  html:
+    smooth-scroll: true
+    toc: true
+    toc-depth: 6
+    toc-location: right
+    number-sections: true
+    number-depth: 6
+    code-fold: true
+    bibliography: ref.bib
+    csl: apa-numeric-superscript.csl
+    fig-cap-location: bottom
+#    css: styles.css
+execute:
+  python: true
+  warning: false
+  message: false
+  fig-width: 8
+  fig-height: 6
+---
+
+```{r}
+#| message: false
+#| warning: false
+
+install_and_load <- function(package) {
+  if (!require(package, character.only = TRUE)) {
+    utils::install.packages(package)
+    library(package, character.only = TRUE)
+  }
+}
+
+packages <- c("tidyverse", "runjags", "rjags", "loo", "coda", "lme4", "rstatix","knitr","kableExtra", "scales","patchwork","viridis","gridExtra")
+
+invisible(capture.output(sapply(packages, install_and_load)))
+```
+
+```{r}
+#| message: false
+#| warning: false
+# --- Cargar y Procesar Datos de Tareas Experimentales (Versión Corregida) ---
+#
+# Descripción:
+# Este script está diseñado para procesar archivos .log que contienen DOS tablas de datos.
+# 1. Busca archivos para cada tarea (ericsen, Go/No-Go) y condición (lento, rápido).
+# 2. Lee AMBAS secciones de cada archivo: el registro de ensayos y la tabla de resumen.
+# 3. Almacena los datos en data frames separados para cada sección y condición.
+# 4. Agrega metadatos importantes como ID de sujeto, tarea y condición.
+# 5. Guarda los 8 data frames resultantes como archivos .rds y .csv.
+#
+# Bibliotecas necesarias:
+# - tidyverse: Un conjunto de paquetes para la ciencia de datos en R.
+#
+# Para instalar tidyverse (si no lo tienes):
+# install.packages("tidyverse")
+
+# --- 1. Configuración Inicial ---
+
+# DEFINIR LA RUTA PRINCIPAL
+carpeta_principal <- "G:/My Drive/DCCS/Neurociencia Social/Neurociencia-DCCS/data/data trabajo"
+
+# --- 2. Función de Lectura Mejorada ---
+
+# Función que lee AMBAS tablas de un archivo .log
+read_dual_log_file <- function(filepath) {
+  # Leer todas las líneas del archivo
+  lines <- readLines(filepath, warn = FALSE)
+  
+  # Encontrar los encabezados de ambas tablas
+  header1_index <- which(str_starts(lines, fixed("Subject\tTrial\tEvent Type")))
+  header2_index <- which(str_starts(lines, fixed("Event Type\tCode\tType")))
+  
+  # Validar que ambos encabezados existan
+  if (length(header1_index) == 0 || length(header2_index) == 0) {
+    warning(paste("No se encontraron ambos encabezados en el archivo:", basename(filepath)))
+    return(NULL)
+  }
+  
+  # --- Lectura de la Primera Tabla (Registro de Ensayos) ---
+  # Se salta las líneas de metadatos hasta el primer encabezado
+  # Lee hasta la línea anterior al segundo encabezado
+  rows_to_read_part1 <- header2_index - header1_index - 2
+  
+  df_part1 <- read_tsv(
+    filepath,
+    skip = header1_index -1,
+    n_max = rows_to_read_part1,
+    col_types = cols(.default = "c"), # Leer todo como caracter
+    show_col_types = FALSE,
+    lazy = FALSE
+  )
+  
+  # --- Lectura de la Segunda Tabla (Resumen) ---
+  df_part2 <- read_tsv(
+    filepath,
+    skip = header2_index - 1,
+    col_types = cols(.default = "c"), # Leer todo como caracter
+    show_col_types = FALSE,
+    lazy = FALSE
+  )
+
+  # Devolver una lista con los dos data frames
+  return(list(log_data = df_part1, summary_data = df_part2))
+}
+
+
+# --- 3. Función de Procesamiento Genérica ---
+
+process_task_files <- function(folder_path, task_name, speed) {
+  
+  # Definir patrón de búsqueda de archivos según la tarea y velocidad
+  pattern <- case_when(
+    task_name == "ericsen" && speed == "lento"   ~ "Ericsen_FT_lentp?\\.log$",
+    task_name == "ericsen" && speed == "rapido"  ~ "Ericsen_FT_rapidp?\\.log$",
+    task_name == "GoNoGo"  && speed == "lento"   ~ "gonogo_FZ2R\\.log$",
+    task_name == "GoNoGo"  && speed == "rapido"  ~ "gonogo_FZR\\.log$",
+    TRUE                                        ~ ""
+  )
+  
+  # Buscar archivos recursivamente
+  files <- list.files(folder_path, pattern = pattern, recursive = TRUE, full.names = TRUE)
+
+  
+  # Usar `purrr::map` para procesar cada archivo y manejar errores
+  all_results <- files %>%
+    set_names(basename(dirname(.))) %>% # Nombrar la lista con el ID del sujeto
+    map(safely(read_dual_log_file))
+
+  # Separar los resultados exitosos de los errores
+  successful_results <- all_results %>% keep(~is.null(.x$error)) %>% map("result")
+  failed_results <- all_results %>% keep(~!is.null(.x$error))
+
+  if (length(failed_results) > 0) {
+      cat("Archivos con errores (omitidos):", length(failed_results), "\n")
+  }
+
+  # Combinar los data frames de la primera tabla (log)
+  log_data_combined <- map_df(successful_results, "log_data", .id = "Individual")
+  
+  # Combinar los data frames de la segunda tabla (summary)
+  summary_data_combined <- map_df(successful_results, "summary_data", .id = "Individual")
+  
+  # Función interna para limpiar y convertir tipos de datos
+  clean_and_convert <- function(df) {
+      if(nrow(df) == 0) return(df)
+      # Convertir columnas a numérico, ignorando errores
+      df %>% mutate(across(any_of(c("Trial", "Code", "Time", "TTime", "Uncertainty", "Duration", "ReqTime", "ReqDur", "RT")), 
+                           ~as.numeric(as.character(.))))
+  }
+
+  # Devolver una lista con ambos data frames combinados y limpios
+  list(
+    log_data = clean_and_convert(log_data_combined),
+    summary_data = clean_and_convert(summary_data_combined)
+  )
+}
+
+
+# ============================================
+# 4. PROCESAR TODOS LOS ARCHIVOS
+# ============================================
+
+# Procesar ericsen
+ericsen_lento_data <- process_task_files(carpeta_principal, "ericsen", "lento")
+ericsen_rapido_data <- process_task_files(carpeta_principal, "ericsen", "rapido")
+
+# Procesar Go/No-Go
+gonogo_lento_data <- process_task_files(carpeta_principal, "GoNoGo", "lento")
+gonogo_rapido_data <- process_task_files(carpeta_principal, "GoNoGo", "rapido")
+
+# ============================================
+# 5. GUARDAR RESULTADOS
+# ============================================
+
+output_folder <- file.path(carpeta_principal, "resultados_procesados_completos")
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder)
+}
+
+# Función para guardar archivos RDS y CSV
+save_data <- function(data_list, task_name, speed, folder) {
+  # Guardar datos de registro
+  saveRDS(data_list$log_data, file.path(folder, paste0(task_name, "_", speed, "_log.rds")))
+  write.csv(data_list$log_data, file.path(folder, paste0(task_name, "_", speed, "_log.csv")), row.names = FALSE)
+  
+  # Guardar datos de resumen
+  saveRDS(data_list$summary_data, file.path(folder, paste0(task_name, "_", speed, "_summary.rds")))
+  write.csv(data_list$summary_data, file.path(folder, paste0(task_name, "_", speed, "_summary.csv")), row.names = FALSE)
+}
+
+# Guardar todos los resultados
+save_data(ericsen_lento_data, "ericsen", "lento", output_folder)
+save_data(ericsen_rapido_data, "ericsen", "rapido", output_folder)
+save_data(gonogo_lento_data, "gonogo", "lento", output_folder)
+save_data(gonogo_rapido_data, "gonogo", "rapido", output_folder)
+
+```
+
+```{r}
+
+
+ericsen_lento_data[[1]] <- ericsen_lento_data[[1]] %>% 
+  drop_na(Code) %>% 
+  mutate(across(Subject, ~replace_na(.x, "NA"))) %>% 
+  filter(Subject != "WW")
+
+ericsen_rapido_data[[1]] <- ericsen_rapido_data[[1]] %>% 
+  drop_na(Code) %>% 
+  mutate(across(Subject, ~replace_na(.x, "NA"))) %>% 
+  filter(Subject != "WW")
+
+# Primero, vamos a crear una función para mapear los códigos a las etiquetas de flechas
+get_arrow_pattern <- function(code) {
+  case_when(
+    code == 11 ~ ">>>>>",  # Target derecha, congruente
+    code == 21 ~ "<<<<<",  # Target izquierda, congruente
+    code == 20 ~ ">><>>",  # Target derecha, incongruente
+    code == 10 ~ "<<><<",  # Target izquierda, incongruente
+    TRUE ~ NA_character_
+  )
+}
+
+# Actualizar el procesamiento de datos rápidos
+ericsen_rapido_data_t <- ericsen_rapido_data[[1]] %>% 
+  group_by(Subject) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Subject, group_trial) %>%
+  mutate(
+    valid_trial = ifelse(n() == 2, 1, 0),
+    arrow = as.numeric(substr(Code, 1, 1)),
+    correct_answer = as.numeric(arrow[1] == arrow),
+    # Agregar la variable de patrón de flechas
+    arrow_pattern = factor(get_arrow_pattern(as.numeric(Code[1])),
+                          levels = c(">>>>>", "<<<<<", ">><>>", "<<><<"))
+  ) %>% 
+  select(
+    Subject,
+    Trial,
+    `Event Type`,
+    Code,
+    Time,
+    group_trial:correct_answer,
+    arrow_pattern
+  ) %>%  
+  ungroup() %>%
+  group_by(Subject, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Procesar las respuestas
+resp_ericsen_rapido <- ericsen_rapido_data_t %>% 
+  mutate(
+    action = if_else(arrow == 2, "R", "L"),
+    # Convertir correct_answer a factor con etiquetas en inglés
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>% 
+  filter(`Event Type` != "Picture") %>%
+  ungroup() %>%
+  group_by(Subject, group_trial) %>%
+  filter(
+    RT_ms >= 150
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Para los datos lentos, aplicar el mismo procesamiento
+ericsen_lento_data_t <- ericsen_lento_data[[1]] %>% 
+  group_by(Subject) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Subject, group_trial) %>%
+  mutate(
+    valid_trial = ifelse(n() == 2, 1, 0),
+    arrow = as.numeric(substr(Code, 1, 1)),
+    correct_answer = as.numeric(arrow[1] == arrow),
+    # Agregar la variable de patrón de flechas
+    arrow_pattern = factor(get_arrow_pattern(as.numeric(Code[1])),
+                          levels = c(">>>>>", "<<<<<", ">><>>", "<<><<"))
+  ) %>% 
+  select(
+    Subject,
+    Trial,
+    `Event Type`,
+    Code,
+    Time,
+    group_trial:correct_answer,
+    arrow_pattern
+  ) %>%  
+  ungroup() %>%
+  group_by(Subject, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Procesar las respuestas lentas
+resp_ericsen_lento <- ericsen_lento_data_t %>% 
+  mutate(
+    action = if_else(arrow == 2, "R", "L"),
+    # Convertir correct_answer a factor con etiquetas en inglés
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>% 
+  filter(`Event Type` != "Picture") %>%
+  ungroup() %>%
+  group_by(Subject, group_trial) %>%
+  filter(
+    RT_ms >= 150
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# densidades de correctas versus incorrectas
+# simualcion porceso winner 
+
+```
+
+```{r}
+# Function to create heatmap
+create_heatmap <- function(data, condition_name, color_palette) {
+  heatmap_data <- data %>%
+    group_by(arrow_pattern, correct_response) %>%
+    summarise(
+      frequency = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(arrow_pattern) %>%
+    mutate(
+      total = sum(frequency),
+      percentage = round((frequency / total) * 100, 1)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      label = paste0(frequency, "\n(", percentage, "%)")
+    )
+  
+  p <- ggplot(heatmap_data, aes(x = arrow_pattern, y = correct_response, fill = frequency)) +
+    geom_tile(color = "white", size = 1) +
+    geom_text(aes(label = label), size = 4, color = "white", fontface = "bold") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Response"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 1, size = 10, face = "bold"),
+      axis.text.y = element_text(size = 10, face = "bold"),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      panel.grid = element_blank()
+    )
+  
+  # Apply different color scales
+  if (condition_name == "Fast") {
+    p + scale_fill_viridis(option = "A", name = "Frequency", begin = 0, end = 0.8)
+  } else {
+    p + scale_fill_viridis(option = "C", name = "Frequency")
+  }
+}
+
+# Create heatmaps for both conditions
+heatmap_fast <- create_heatmap(resp_ericsen_rapido, "Fast", "A")
+heatmap_slow <- create_heatmap(resp_ericsen_lento, "Slow", "C")
+
+# Display both plots together
+grid.arrange(heatmap_fast, heatmap_slow, ncol = 1, nrow = 2,
+             top = "Distribution of Correct and Incorrect Responses\nFlanker Experiment")
+```
+```{r}
+#| fig-height: 12
+#| fig-width: 10
+
+# Function to create stacked bar chart
+create_stacked_bar <- function(data, condition_name) {
+  # Prepare data for stacked bars
+  bar_data <- data %>%
+    group_by(Trial, arrow_pattern, correct_response) %>%
+    summarise(
+      count = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(Trial, arrow_pattern) %>%
+    mutate(
+      total = sum(count),
+      percentage = (count / total) * 100
+    ) %>%
+    ungroup()
+  
+  # Create stacked bar plot
+  ggplot(bar_data, aes(x = Trial, y = percentage, fill = correct_response)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.8) +
+    facet_wrap(~ arrow_pattern, ncol = 2, scales = "free_x") +
+    scale_fill_manual(values = c("Incorrect" = "#E74C3C", "Correct" = "#27AE60"),
+                      name = "Response") +
+    labs(
+      title = paste(condition_name, "Condition - Response Distribution by Trial"),
+      x = "Trial Number",
+      y = "Percentage (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "top",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 25), limits = c(0, 100))
+}
+
+# Create plots for both conditions
+stacked_fast <- create_stacked_bar(resp_ericsen_rapido, "Fast")
+stacked_slow <- create_stacked_bar(resp_ericsen_lento, "Slow")
+
+# Display both plots
+grid.arrange(stacked_fast, stacked_slow, ncol = 1, nrow = 2)
+```
+```{r}
+#| fig-height: 12
+#| fig-width: 10
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+
+# Function to create arrow pattern distribution plot
+create_pattern_distribution <- function(data, condition_name) {
+  # Get the full data with arrow patterns before filtering responses
+  full_data <- if(condition_name == "Fast") {
+    ericsen_rapido_data_t
+  } else {
+    ericsen_lento_data_t
+  }
+  
+  # Get unique arrow patterns per trial (from Picture events)
+  pattern_data <- full_data %>%
+    filter(`Event Type` == "Picture") %>%
+    select(Trial, arrow_pattern) %>%
+    distinct()
+  
+  # Create distribution plot
+  ggplot(pattern_data, aes(x = Trial, color = arrow_pattern, fill = arrow_pattern)) +
+    geom_density(alpha = 0.3, size = 1, adjust = 1.5) +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    scale_fill_manual(values = c(">>>>>" = "#2E86AB", 
+                                 "<<<<<" = "#A23B72", 
+                                 ">><>>" = "#F18F01", 
+                                 "<<><<" = "#C73E1D"),
+                      name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition - Distribution of Arrow Patterns Across Trials"),
+      x = "Trial Number",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# Create pattern distribution plots
+pattern_fast <- create_pattern_distribution(resp_ericsen_rapido, "Fast")
+pattern_slow <- create_pattern_distribution(resp_ericsen_lento, "Slow")
+
+# Display pattern distribution plots
+grid.arrange(pattern_fast, pattern_slow, ncol = 1, nrow = 2)
+
+# Function to create density plot with Trial on X-axis for incorrect responses
+create_incorrect_density_plot <- function(data, condition_name) {
+  # Calculate percentage of incorrect responses per trial and arrow pattern
+  density_data <- data %>%
+    group_by(Trial, arrow_pattern) %>%
+    summarise(
+      total = n(),
+      incorrect_count = sum(correct_response == "Incorrect"),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      incorrect_percentage = (incorrect_count / total) * 100
+    ) %>%
+    complete(Trial, arrow_pattern, fill = list(incorrect_percentage = NA)) %>%
+    filter(!is.na(incorrect_percentage))
+  
+  # Create density plot with smoothed lines
+  ggplot(density_data, aes(x = Trial, y = incorrect_percentage, color = arrow_pattern)) +
+    geom_smooth(method = "loess", span = 0.3, se = TRUE, alpha = 0.2, size = 1) +
+    geom_point(alpha = 0.3, size = 1) +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition - Smoothed Incorrect Response Percentage by Trial"),
+      x = "Trial Number",
+      y = "Incorrect Response Percentage (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 20), limits = c(0, 100))
+}
+
+# Create incorrect response plots for both conditions
+incorrect_fast <- create_incorrect_density_plot(resp_ericsen_rapido, "Fast")
+incorrect_slow <- create_incorrect_density_plot(resp_ericsen_lento, "Slow")
+
+# Display incorrect response plots
+grid.arrange(incorrect_fast, incorrect_slow, ncol = 1, nrow = 2)
+```
+
