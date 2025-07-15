@@ -333,7 +333,6 @@ resp_ericsen_lento <- ericsen_lento_data_t %>%
 ```
 
 ```{r}
-# Function to create heatmap
 create_heatmap <- function(data, condition_name, color_palette) {
   heatmap_data <- data %>%
     group_by(arrow_pattern, correct_response) %>%
@@ -368,8 +367,7 @@ create_heatmap <- function(data, condition_name, color_palette) {
       legend.position = "right",
       panel.grid = element_blank()
     )
-  
-  # Apply different color scales
+
   if (condition_name == "Fast") {
     p + scale_fill_viridis(option = "A", name = "Frequency", begin = 0, end = 0.8)
   } else {
@@ -377,11 +375,9 @@ create_heatmap <- function(data, condition_name, color_palette) {
   }
 }
 
-# Create heatmaps for both conditions
 heatmap_fast <- create_heatmap(resp_ericsen_rapido, "Fast", "A")
 heatmap_slow <- create_heatmap(resp_ericsen_lento, "Slow", "C")
 
-# Display both plots together
 grid.arrange(heatmap_fast, heatmap_slow, ncol = 1, nrow = 2,
              top = "Distribution of Correct and Incorrect Responses\nFlanker Experiment")
 ```
@@ -389,9 +385,7 @@ grid.arrange(heatmap_fast, heatmap_slow, ncol = 1, nrow = 2,
 #| fig-height: 12
 #| fig-width: 10
 
-# Function to create stacked bar chart
 create_stacked_bar <- function(data, condition_name) {
-  # Prepare data for stacked bars
   bar_data <- data %>%
     group_by(Trial, arrow_pattern, correct_response) %>%
     summarise(
@@ -405,7 +399,6 @@ create_stacked_bar <- function(data, condition_name) {
     ) %>%
     ungroup()
   
-  # Create stacked bar plot
   ggplot(bar_data, aes(x = Trial, y = percentage, fill = correct_response)) +
     geom_bar(stat = "identity", position = "stack", width = 0.8) +
     facet_wrap(~ arrow_pattern, ncol = 2, scales = "free_x") +
@@ -440,26 +433,20 @@ grid.arrange(stacked_fast, stacked_slow, ncol = 1, nrow = 2)
 ```{r}
 #| fig-height: 12
 #| fig-width: 10
-library(tidyverse)
-library(ggplot2)
-library(gridExtra)
 
-# Function to create arrow pattern distribution plot
 create_pattern_distribution <- function(data, condition_name) {
-  # Get the full data with arrow patterns before filtering responses
+
   full_data <- if(condition_name == "Fast") {
     ericsen_rapido_data_t
   } else {
     ericsen_lento_data_t
   }
   
-  # Get unique arrow patterns per trial (from Picture events)
   pattern_data <- full_data %>%
     filter(`Event Type` == "Picture") %>%
     select(Trial, arrow_pattern) %>%
     distinct()
   
-  # Create distribution plot
   ggplot(pattern_data, aes(x = Trial, color = arrow_pattern, fill = arrow_pattern)) +
     geom_density(alpha = 0.3, size = 1, adjust = 1.5) +
     scale_color_manual(values = c(">>>>>" = "#2E86AB", 
@@ -488,16 +475,12 @@ create_pattern_distribution <- function(data, condition_name) {
     )
 }
 
-# Create pattern distribution plots
 pattern_fast <- create_pattern_distribution(resp_ericsen_rapido, "Fast")
 pattern_slow <- create_pattern_distribution(resp_ericsen_lento, "Slow")
 
-# Display pattern distribution plots
 grid.arrange(pattern_fast, pattern_slow, ncol = 1, nrow = 2)
 
-# Function to create density plot with Trial on X-axis for incorrect responses
 create_incorrect_density_plot <- function(data, condition_name) {
-  # Calculate percentage of incorrect responses per trial and arrow pattern
   density_data <- data %>%
     group_by(Trial, arrow_pattern) %>%
     summarise(
@@ -537,11 +520,102 @@ create_incorrect_density_plot <- function(data, condition_name) {
     scale_y_continuous(breaks = seq(0, 100, 20), limits = c(0, 100))
 }
 
-# Create incorrect response plots for both conditions
 incorrect_fast <- create_incorrect_density_plot(resp_ericsen_rapido, "Fast")
 incorrect_slow <- create_incorrect_density_plot(resp_ericsen_lento, "Slow")
 
-# Display incorrect response plots
 grid.arrange(incorrect_fast, incorrect_slow, ncol = 1, nrow = 2)
+```
+```{r}
+#| fig-height: 12
+#| fig-width: 10
+# Function to create RT density plot
+create_rt_density_plot <- function(data, condition_name) {
+  # Filter out extreme RT values if needed (optional)
+  rt_data <- data %>%
+    filter(RT_ms > 0 & RT_ms < 2000)  # Keep RTs between 0 and 2000ms
+  
+  # Create density plot
+  ggplot(rt_data, aes(x = RT_ms, fill = arrow_pattern, color = arrow_pattern)) +
+    geom_density(alpha = 0.3, size = 1) +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_manual(values = c(">>>>>" = "#2E86AB", 
+                                 "<<<<<" = "#A23B72", 
+                                 ">><>>" = "#F18F01", 
+                                 "<<><<" = "#C73E1D"),
+                      name = "Arrow Pattern") +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition - Response Time Distribution by Arrow Pattern"),
+      subtitle = "Faceted by Response Correctness",
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(0, 2000, 250))
+}
+
+# Create RT density plots for both conditions
+rt_density_fast <- create_rt_density_plot(resp_ericsen_rapido, "Fast")
+rt_density_slow <- create_rt_density_plot(resp_ericsen_lento, "Slow")
+
+# Display both plots
+grid.arrange(rt_density_fast, rt_density_slow, ncol = 1, nrow = 2)
+
+# Alternative version with violin plots for better comparison
+create_rt_violin_plot <- function(data, condition_name) {
+  # Filter out extreme RT values
+  rt_data <- data %>%
+    filter(RT_ms > 0 & RT_ms < 2000)
+  
+  # Create violin plot
+  ggplot(rt_data, aes(x = arrow_pattern, y = RT_ms, fill = arrow_pattern)) +
+    geom_violin(alpha = 0.7, scale = "width") +
+    geom_boxplot(width = 0.1, alpha = 0.8, outlier.size = 1) +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_manual(values = c(">>>>>" = "#2E86AB", 
+                                 "<<<<<" = "#A23B72", 
+                                 ">><>>" = "#F18F01", 
+                                 "<<><<" = "#C73E1D"),
+                      name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition - Response Time Distribution"),
+      subtitle = "Violin plots with embedded boxplots",
+      x = "Arrow Pattern",
+      y = "Response Time (ms)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 10, face = "bold"),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "none",
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 2000, 250))
+}
+
+# Create violin plots
+rt_violin_fast <- create_rt_violin_plot(resp_ericsen_rapido, "Fast")
+rt_violin_slow <- create_rt_violin_plot(resp_ericsen_lento, "Slow")
+
+# Display violin plots
+grid.arrange(rt_violin_fast, rt_violin_slow, ncol = 1, nrow = 2)
 ```
 
