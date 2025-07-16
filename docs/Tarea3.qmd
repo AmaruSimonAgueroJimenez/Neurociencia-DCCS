@@ -28,7 +28,7 @@ execute:
 <img src="logo2.png" style="width: 400px; position:relative; top:0; right:0; padding:10px;"/>
 
 
-```{r}
+```{r setup}
 #| message: false
 #| warning: false
 
@@ -39,85 +39,80 @@ install_and_load <- function(package) {
   }
 }
 
-packages <- c("tidyverse", "runjags", "rjags", "loo", "coda", "lme4", "rstatix","knitr","kableExtra", "scales","patchwork","viridis","gridExtra")
+packages <- c("tidyverse", "loo", "coda", "lme4", "rstatix","knitr","kableExtra", 
+              "scales","patchwork","viridis","gridExtra", "ggpubr")
 
 invisible(capture.output(sapply(packages, install_and_load)))
 ```
 
-```{r}
+```{r data-loading}
 #| message: false
 #| warning: false
-# --- Cargar y Procesar Datos de Tareas Experimentales (Versión Corregida) ---
+# --- Load and Process Experimental Task Data (Corrected Version) ---
 #
-# Descripción:
-# Este script está diseñado para procesar archivos .log que contienen DOS tablas de datos.
-# 1. Busca archivos para cada tarea (ericsen, Go/No-Go) y condición (lento, rápido).
-# 2. Lee AMBAS secciones de cada archivo: el registro de ensayos y la tabla de resumen.
-# 3. Almacena los datos en data frames separados para cada sección y condición.
-# 4. Agrega metadatos importantes como ID de sujeto, tarea y condición.
-# 5. Guarda los 8 data frames resultantes como archivos .rds y .csv.
-#
-# Bibliotecas necesarias:
-# - tidyverse: Un conjunto de paquetes para la ciencia de datos en R.
-#
-# Para instalar tidyverse (si no lo tienes):
-# install.packages("tidyverse")
+# Description:
+# This script is designed to process .log files containing TWO data tables.
+# 1. Searches for files for each task (ericsen, Go/No-Go) and condition (slow, fast).
+# 2. Reads BOTH sections of each file: trial log and summary table.
+# 3. Stores data in separate data frames for each section and condition.
+# 4. Adds important metadata such as subject ID, task, and condition.
+# 5. Saves the resulting 8 data frames as .rds and .csv files.
 
-# --- 1. Configuración Inicial ---
+# --- 1. Initial Setup ---
 
-# DEFINIR LA RUTA PRINCIPAL
+# DEFINE MAIN PATH
 carpeta_principal <- "G:/My Drive/DCCS/Neurociencia Social/Neurociencia-DCCS/data/data trabajo"
 
-# --- 2. Función de Lectura Mejorada ---
+# --- 2. Enhanced Reading Function ---
 
-# Función que lee AMBAS tablas de un archivo .log
+# Function that reads BOTH tables from a .log file
 read_dual_log_file <- function(filepath) {
-  # Leer todas las líneas del archivo
+  # Read all lines from file
   lines <- readLines(filepath, warn = FALSE)
   
-  # Encontrar los encabezados de ambas tablas
+  # Find headers for both tables
   header1_index <- which(str_starts(lines, fixed("Subject\tTrial\tEvent Type")))
   header2_index <- which(str_starts(lines, fixed("Event Type\tCode\tType")))
   
-  # Validar que ambos encabezados existan
+  # Validate that both headers exist
   if (length(header1_index) == 0 || length(header2_index) == 0) {
-    warning(paste("No se encontraron ambos encabezados en el archivo:", basename(filepath)))
+    warning(paste("Both headers not found in file:", basename(filepath)))
     return(NULL)
   }
   
-  # --- Lectura de la Primera Tabla (Registro de Ensayos) ---
-  # Se salta las líneas de metadatos hasta el primer encabezado
-  # Lee hasta la línea anterior al segundo encabezado
+  # --- Reading First Table (Trial Log) ---
+  # Skip metadata lines until first header
+  # Read until line before second header
   rows_to_read_part1 <- header2_index - header1_index - 2
   
   df_part1 <- read_tsv(
     filepath,
     skip = header1_index -1,
     n_max = rows_to_read_part1,
-    col_types = cols(.default = "c"), # Leer todo como caracter
+    col_types = cols(.default = "c"), # Read everything as character
     show_col_types = FALSE,
     lazy = FALSE
   )
   
-  # --- Lectura de la Segunda Tabla (Resumen) ---
+  # --- Reading Second Table (Summary) ---
   df_part2 <- read_tsv(
     filepath,
     skip = header2_index - 1,
-    col_types = cols(.default = "c"), # Leer todo como caracter
+    col_types = cols(.default = "c"), # Read everything as character
     show_col_types = FALSE,
     lazy = FALSE
   )
 
-  # Devolver una lista con los dos data frames
+  # Return a list with both data frames
   return(list(log_data = df_part1, summary_data = df_part2))
 }
 
 
-# --- 3. Función de Procesamiento Genérica ---
+# --- 3. Generic Processing Function ---
 
 process_task_files <- function(folder_path, task_name, speed) {
   
-  # Definir patrón de búsqueda de archivos según la tarea y velocidad
+  # Define file search pattern based on task and speed
   pattern <- case_when(
     task_name == "ericsen" && speed == "lento"   ~ "Ericsen_FT_lentp?\\.log$",
     task_name == "ericsen" && speed == "rapido"  ~ "Ericsen_FT_rapidp?\\.log$",
@@ -126,38 +121,38 @@ process_task_files <- function(folder_path, task_name, speed) {
     TRUE                                        ~ ""
   )
   
-  # Buscar archivos recursivamente
+  # Search for files recursively
   files <- list.files(folder_path, pattern = pattern, recursive = TRUE, full.names = TRUE)
 
   
-  # Usar `purrr::map` para procesar cada archivo y manejar errores
+  # Use `purrr::map` to process each file and handle errors
   all_results <- files %>%
-    set_names(basename(dirname(.))) %>% # Nombrar la lista con el ID del sujeto
+    set_names(basename(dirname(.))) %>% # Name list with subject ID
     map(safely(read_dual_log_file))
 
-  # Separar los resultados exitosos de los errores
+  # Separate successful results from errors
   successful_results <- all_results %>% keep(~is.null(.x$error)) %>% map("result")
   failed_results <- all_results %>% keep(~!is.null(.x$error))
 
   if (length(failed_results) > 0) {
-      cat("Archivos con errores (omitidos):", length(failed_results), "\n")
+      cat("Files with errors (omitted):", length(failed_results), "\n")
   }
 
-  # Combinar los data frames de la primera tabla (log)
+  # Combine data frames from first table (log)
   log_data_combined <- map_df(successful_results, "log_data", .id = "Individual")
   
-  # Combinar los data frames de la segunda tabla (summary)
+  # Combine data frames from second table (summary)
   summary_data_combined <- map_df(successful_results, "summary_data", .id = "Individual")
   
-  # Función interna para limpiar y convertir tipos de datos
+  # Internal function to clean and convert data types
   clean_and_convert <- function(df) {
       if(nrow(df) == 0) return(df)
-      # Convertir columnas a numérico, ignorando errores
+      # Convert columns to numeric, ignoring errors
       df %>% mutate(across(any_of(c("Trial", "Code", "Time", "TTime", "Uncertainty", "Duration", "ReqTime", "ReqDur", "RT")), 
                            ~as.numeric(as.character(.))))
   }
 
-  # Devolver una lista con ambos data frames combinados y limpios
+  # Return a list with both combined and clean data frames
   list(
     log_data = clean_and_convert(log_data_combined),
     summary_data = clean_and_convert(summary_data_combined)
@@ -166,19 +161,19 @@ process_task_files <- function(folder_path, task_name, speed) {
 
 
 # ============================================
-# 4. PROCESAR TODOS LOS ARCHIVOS
+# 4. PROCESS ALL FILES
 # ============================================
 
-# Procesar ericsen
+# Process Flanker task
 ericsen_lento_data <- process_task_files(carpeta_principal, "ericsen", "lento")
 ericsen_rapido_data <- process_task_files(carpeta_principal, "ericsen", "rapido")
 
-# Procesar Go/No-Go
+# Process Go/No-Go
 gonogo_lento_data <- process_task_files(carpeta_principal, "GoNoGo", "lento")
 gonogo_rapido_data <- process_task_files(carpeta_principal, "GoNoGo", "rapido")
 
 # ============================================
-# 5. GUARDAR RESULTADOS
+# 5. SAVE RESULTS
 # ============================================
 
 output_folder <- file.path(carpeta_principal, "resultados_procesados_completos")
@@ -186,18 +181,18 @@ if (!dir.exists(output_folder)) {
   dir.create(output_folder)
 }
 
-# Función para guardar archivos RDS y CSV
+# Function to save RDS and CSV files
 save_data <- function(data_list, task_name, speed, folder) {
-  # Guardar datos de registro
+  # Save log data
   saveRDS(data_list$log_data, file.path(folder, paste0(task_name, "_", speed, "_log.rds")))
   write.csv(data_list$log_data, file.path(folder, paste0(task_name, "_", speed, "_log.csv")), row.names = FALSE)
   
-  # Guardar datos de resumen
+  # Save summary data
   saveRDS(data_list$summary_data, file.path(folder, paste0(task_name, "_", speed, "_summary.rds")))
   write.csv(data_list$summary_data, file.path(folder, paste0(task_name, "_", speed, "_summary.csv")), row.names = FALSE)
 }
 
-# Guardar todos los resultados
+# Save all results
 save_data(ericsen_lento_data, "ericsen", "lento", output_folder)
 save_data(ericsen_rapido_data, "ericsen", "rapido", output_folder)
 save_data(gonogo_lento_data, "gonogo", "lento", output_folder)
@@ -205,31 +200,58 @@ save_data(gonogo_rapido_data, "gonogo", "rapido", output_folder)
 
 ```
 
-```{r}
+# Flanker task
 
+```{r data-preprocessing}
+# Create a unified subject mapping across all tasks
+all_subjects <- unique(c(
+  ericsen_lento_data[[1]]$Subject,
+  ericsen_rapido_data[[1]]$Subject,
+  gonogo_lento_data[[1]]$Individual,
+  gonogo_rapido_data[[1]]$Individual
+))
 
+# Remove only WW subjects, keep NA as a valid subject
+all_subjects <- all_subjects[all_subjects != "WW"]
+# Ensure NA is treated as a character "NA" not as missing
+all_subjects[is.na(all_subjects)] <- "NA"
+
+# Create global subject mapping
+global_subject_mapping <- data.frame(
+  Subject = all_subjects,
+  Subject_num = seq_along(all_subjects),
+  Subject_label = paste0("S", seq_along(all_subjects))
+)
+
+# Function to create subject-numbered data with global mapping
+create_subject_numbered_data <- function(data, subject_col = "Subject") {
+  data %>%
+    left_join(global_subject_mapping, by = setNames("Subject", subject_col)) %>%
+    mutate(Subject_label = factor(Subject_label, 
+                                  levels = global_subject_mapping$Subject_label))
+}
+
+# Preprocess Flanker data
 ericsen_lento_data[[1]] <- ericsen_lento_data[[1]] %>% 
   drop_na(Code) %>% 
-  mutate(across(Subject, ~replace_na(.x, "NA"))) %>% 
   filter(Subject != "WW")
 
 ericsen_rapido_data[[1]] <- ericsen_rapido_data[[1]] %>% 
   drop_na(Code) %>% 
-  mutate(across(Subject, ~replace_na(.x, "NA"))) %>% 
   filter(Subject != "WW")
 
-# Primero, vamos a crear una función para mapear los códigos a las etiquetas de flechas
+# Function to map codes to arrow patterns
 get_arrow_pattern <- function(code) {
   case_when(
-    code == 11 ~ ">>>>>",  # Target derecha, congruente
-    code == 21 ~ "<<<<<",  # Target izquierda, congruente
-    code == 20 ~ ">><>>",  # Target derecha, incongruente
-    code == 10 ~ "<<><<",  # Target izquierda, incongruente
+    code == 11 ~ ">>>>>",  # Target right, congruent
+    code == 21 ~ "<<<<<",  # Target left, congruent
+    code == 20 ~ ">><>>",  # Target right, incongruent
+    code == 10 ~ "<<><<",  # Target left, incongruent
     TRUE ~ NA_character_
   )
 }
 
-# Actualizar el procesamiento de datos rápidos
+# Process fast condition data
 ericsen_rapido_data_t <- ericsen_rapido_data[[1]] %>% 
   group_by(Subject) %>% 
   mutate(
@@ -241,7 +263,6 @@ ericsen_rapido_data_t <- ericsen_rapido_data[[1]] %>%
     valid_trial = ifelse(n() == 2, 1, 0),
     arrow = as.numeric(substr(Code, 1, 1)),
     correct_answer = as.numeric(arrow[1] == arrow),
-    # Agregar la variable de patrón de flechas
     arrow_pattern = factor(get_arrow_pattern(as.numeric(Code[1])),
                           levels = c(">>>>>", "<<<<<", ">><>>", "<<><<"))
   ) %>% 
@@ -261,11 +282,10 @@ ericsen_rapido_data_t <- ericsen_rapido_data[[1]] %>%
     RT_ms = (Time - Time[1]) / 10
   )
 
-# Procesar las respuestas
+# Process fast condition responses
 resp_ericsen_rapido <- ericsen_rapido_data_t %>% 
   mutate(
     action = if_else(arrow == 2, "R", "L"),
-    # Convertir correct_answer a factor con etiquetas en inglés
     correct_response = factor(correct_answer, 
                              levels = c(0, 1), 
                              labels = c("Incorrect", "Correct"))
@@ -279,7 +299,7 @@ resp_ericsen_rapido <- ericsen_rapido_data_t %>%
   ) %>% 
   slice_min(order_by = Time, n = 1)
 
-# Para los datos lentos, aplicar el mismo procesamiento
+# Process slow condition data
 ericsen_lento_data_t <- ericsen_lento_data[[1]] %>% 
   group_by(Subject) %>% 
   mutate(
@@ -291,7 +311,6 @@ ericsen_lento_data_t <- ericsen_lento_data[[1]] %>%
     valid_trial = ifelse(n() == 2, 1, 0),
     arrow = as.numeric(substr(Code, 1, 1)),
     correct_answer = as.numeric(arrow[1] == arrow),
-    # Agregar la variable de patrón de flechas
     arrow_pattern = factor(get_arrow_pattern(as.numeric(Code[1])),
                           levels = c(">>>>>", "<<<<<", ">><>>", "<<><<"))
   ) %>% 
@@ -311,11 +330,10 @@ ericsen_lento_data_t <- ericsen_lento_data[[1]] %>%
     RT_ms = (Time - Time[1]) / 10
   )
 
-# Procesar las respuestas lentas
+# Process slow condition responses
 resp_ericsen_lento <- ericsen_lento_data_t %>% 
   mutate(
     action = if_else(arrow == 2, "R", "L"),
-    # Convertir correct_answer a factor con etiquetas en inglés
     correct_response = factor(correct_answer, 
                              levels = c(0, 1), 
                              labels = c("Incorrect", "Correct"))
@@ -329,12 +347,18 @@ resp_ericsen_lento <- ericsen_lento_data_t %>%
   ) %>% 
   slice_min(order_by = Time, n = 1)
 
-# densidades de correctas versus incorrectas
-# simualcion porceso winner 
-
+# Add subject numbers to Flanker data
+resp_ericsen_rapido_num <- create_subject_numbered_data(resp_ericsen_rapido)
+resp_ericsen_lento_num <- create_subject_numbered_data(resp_ericsen_lento)
 ```
 
-```{r}
+
+
+```{r flanker-accuracy-heatmaps}
+#| fig.height: 8
+#| fig.width: 10
+#| fig.cap: "Figure 1. Distribution of correct and incorrect responses in the Flanker task. (A) Fast condition and (B) Slow condition show the frequency and percentage of responses for each arrow pattern (congruent: >>>>> and <<<<<; incongruent: >><>> and <<><<)."
+
 create_heatmap <- function(data, condition_name, color_palette) {
   heatmap_data <- data %>%
     group_by(arrow_pattern, correct_response) %>%
@@ -377,15 +401,19 @@ create_heatmap <- function(data, condition_name, color_palette) {
   }
 }
 
-heatmap_fast <- create_heatmap(resp_ericsen_rapido, "Fast", "A")
-heatmap_slow <- create_heatmap(resp_ericsen_lento, "Slow", "C")
+heatmap_fast <- create_heatmap(resp_ericsen_rapido_num, "Fast", "A")
+heatmap_slow <- create_heatmap(resp_ericsen_lento_num, "Slow", "C")
 
-grid.arrange(heatmap_fast, heatmap_slow, ncol = 1, nrow = 2,
-             top = "Distribution of Correct and Incorrect Responses\nFlanker Experiment")
+ggarrange(heatmap_fast, heatmap_slow, 
+          ncol = 1, nrow = 2,
+          labels = c("A", "B"),
+          common.legend = FALSE)
 ```
-```{r}
-#| fig-height: 12
-#| fig-width: 10
+
+```{r flanker-trial-progression}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Figure 2. Trial-by-trial analysis of the Flanker task. (A-B) Response distribution across trials for each arrow pattern in fast and slow conditions. (C-D) Distribution of arrow patterns across experimental trials. (E-F) Smoothed error rates showing learning curves for each arrow pattern."
 
 create_stacked_bar <- function(data, condition_name) {
   bar_data <- data %>%
@@ -407,7 +435,7 @@ create_stacked_bar <- function(data, condition_name) {
     scale_fill_manual(values = c("Incorrect" = "#E74C3C", "Correct" = "#27AE60"),
                       name = "Response") +
     labs(
-      title = paste(condition_name, "Condition - Response Distribution by Trial"),
+      title = paste(condition_name, "Condition"),
       x = "Trial Number",
       y = "Percentage (%)"
     ) +
@@ -425,19 +453,7 @@ create_stacked_bar <- function(data, condition_name) {
     scale_y_continuous(breaks = seq(0, 100, 25), limits = c(0, 100))
 }
 
-# Create plots for both conditions
-stacked_fast <- create_stacked_bar(resp_ericsen_rapido, "Fast")
-stacked_slow <- create_stacked_bar(resp_ericsen_lento, "Slow")
-
-# Display both plots
-grid.arrange(stacked_fast, stacked_slow, ncol = 1, nrow = 2)
-```
-```{r}
-#| fig-height: 12
-#| fig-width: 10
-
 create_pattern_distribution <- function(data, condition_name) {
-
   full_data <- if(condition_name == "Fast") {
     ericsen_rapido_data_t
   } else {
@@ -462,7 +478,7 @@ create_pattern_distribution <- function(data, condition_name) {
                                  "<<><<" = "#C73E1D"),
                       name = "Arrow Pattern") +
     labs(
-      title = paste(condition_name, "Condition - Distribution of Arrow Patterns Across Trials"),
+      title = paste(condition_name, "Condition"),
       x = "Trial Number",
       y = "Density"
     ) +
@@ -476,11 +492,6 @@ create_pattern_distribution <- function(data, condition_name) {
       panel.grid.minor = element_blank()
     )
 }
-
-pattern_fast <- create_pattern_distribution(resp_ericsen_rapido, "Fast")
-pattern_slow <- create_pattern_distribution(resp_ericsen_lento, "Slow")
-
-grid.arrange(pattern_fast, pattern_slow, ncol = 1, nrow = 2)
 
 create_incorrect_density_plot <- function(data, condition_name) {
   density_data <- data %>%
@@ -496,7 +507,6 @@ create_incorrect_density_plot <- function(data, condition_name) {
     complete(Trial, arrow_pattern, fill = list(incorrect_percentage = NA)) %>%
     filter(!is.na(incorrect_percentage))
   
-  # Create density plot with smoothed lines
   ggplot(density_data, aes(x = Trial, y = incorrect_percentage, color = arrow_pattern)) +
     geom_smooth(method = "loess", span = 0.3, se = TRUE, alpha = 0.2, size = 1) +
     geom_point(alpha = 0.3, size = 1) +
@@ -506,9 +516,9 @@ create_incorrect_density_plot <- function(data, condition_name) {
                                   "<<><<" = "#C73E1D"),
                        name = "Arrow Pattern") +
     labs(
-      title = paste(condition_name, "Condition - Smoothed Incorrect Response Percentage by Trial"),
+      title = paste(condition_name, "Condition"),
       x = "Trial Number",
-      y = "Incorrect Response Percentage (%)"
+      y = "Error Rate (%)"
     ) +
     theme_minimal() +
     theme(
@@ -522,28 +532,39 @@ create_incorrect_density_plot <- function(data, condition_name) {
     scale_y_continuous(breaks = seq(0, 100, 20), limits = c(0, 100))
 }
 
-incorrect_fast <- create_incorrect_density_plot(resp_ericsen_rapido, "Fast")
-incorrect_slow <- create_incorrect_density_plot(resp_ericsen_lento, "Slow")
+# Create plots
+stacked_fast <- create_stacked_bar(resp_ericsen_rapido_num, "Fast")
+stacked_slow <- create_stacked_bar(resp_ericsen_lento_num, "Slow")
+pattern_fast <- create_pattern_distribution(resp_ericsen_rapido_num, "Fast")
+pattern_slow <- create_pattern_distribution(resp_ericsen_lento_num, "Slow")
+incorrect_fast <- create_incorrect_density_plot(resp_ericsen_rapido_num, "Fast")
+incorrect_slow <- create_incorrect_density_plot(resp_ericsen_lento_num, "Slow")
 
-grid.arrange(incorrect_fast, incorrect_slow, ncol = 1, nrow = 2)
+# Arrange plots
+ggarrange(stacked_fast, stacked_slow,
+          pattern_fast, pattern_slow,
+          incorrect_fast, incorrect_slow,
+          ncol = 2, nrow = 3,
+          labels = c("A", "B", "C", "D", "E", "F"),
+          common.legend = FALSE)
 ```
 
-```{r}
-#| fig-height: 12
-#| fig-width: 10
-#| 
-# Calculate max RT across both conditions for consistent axes
-max_rt_fast <- max(resp_ericsen_rapido$RT_ms, na.rm = TRUE)
-max_rt_slow <- max(resp_ericsen_lento$RT_ms, na.rm = TRUE)
-max_rt_overall <- max(max_rt_fast, max_rt_slow) -1000
+```{r flanker-rt-distributions}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Figure 3. Response time distributions in the Flanker task. (A-B) Density plots showing RT distributions for each arrow pattern, separated by response accuracy. (C-D) Violin plots with embedded boxplots showing RT distributions and outliers for each condition."
 
-# Function to create RT density plot
-create_rt_density_plot <- function(data, condition_name, max_rt) {
-  # Filter to include only RTs >= 150ms
-  rt_data <- data %>%
-    filter(RT_ms >= 150)
+# Calculate RT limits
+min_rt_fast <- min(resp_ericsen_rapido_num$RT_ms, na.rm = TRUE)
+min_rt_slow <- min(resp_ericsen_lento_num$RT_ms, na.rm = TRUE)
+min_rt_overall <- min(min_rt_fast, min_rt_slow)
+max_rt_fast <- max(resp_ericsen_rapido_num$RT_ms, na.rm = TRUE)
+max_rt_slow <- max(resp_ericsen_lento_num$RT_ms, na.rm = TRUE)
+max_rt_overall <- max(max_rt_fast, max_rt_slow)
+
+create_rt_density_plot <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data
   
-  # Create density plot
   ggplot(rt_data, aes(x = RT_ms, fill = arrow_pattern, color = arrow_pattern)) +
     geom_density(alpha = 0.3, size = 1) +
     facet_wrap(~ correct_response, ncol = 2) +
@@ -558,8 +579,7 @@ create_rt_density_plot <- function(data, condition_name, max_rt) {
                                   "<<><<" = "#C73E1D"),
                        name = "Arrow Pattern") +
     labs(
-      title = paste(condition_name, "Condition - Response Time Distribution by Arrow Pattern"),
-      subtitle = "Faceted by Response Correctness",
+      title = paste(condition_name, "Condition"),
       x = "Response Time (ms)",
       y = "Density"
     ) +
@@ -568,29 +588,18 @@ create_rt_density_plot <- function(data, condition_name, max_rt) {
       axis.text = element_text(size = 10),
       axis.title = element_text(size = 12, face = "bold"),
       plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(size = 10, hjust = 0.5),
       strip.text = element_text(size = 11, face = "bold"),
       legend.position = "bottom",
       legend.title = element_text(face = "bold"),
       panel.grid.minor = element_blank()
     ) +
-    scale_x_continuous(breaks = seq(0, ceiling(max_rt/500)*500, 500), limits = c(150, max_rt))
+    scale_x_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
 }
 
-# Create RT density plots for both conditions
-rt_density_fast <- create_rt_density_plot(resp_ericsen_rapido, "Fast", max_rt_overall)
-rt_density_slow <- create_rt_density_plot(resp_ericsen_lento, "Slow", max_rt_overall)
-
-# Display both plots
-grid.arrange(rt_density_fast, rt_density_slow, ncol = 1, nrow = 2)
-
-# Alternative version with violin plots for better comparison
-create_rt_violin_plot <- function(data, condition_name, max_rt) {
-  # Filter to include only RTs >= 150ms
-  rt_data <- data %>%
-    filter(RT_ms >= 150)
+create_rt_violin_plot <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data
   
-  # Create violin plot
   ggplot(rt_data, aes(x = arrow_pattern, y = RT_ms, fill = arrow_pattern)) +
     geom_violin(alpha = 0.7, scale = "width") +
     geom_boxplot(width = 0.1, alpha = 0.8, outlier.size = 1) +
@@ -601,8 +610,7 @@ create_rt_violin_plot <- function(data, condition_name, max_rt) {
                                  "<<><<" = "#C73E1D"),
                       name = "Arrow Pattern") +
     labs(
-      title = paste(condition_name, "Condition - Response Time Distribution"),
-      subtitle = "Violin plots with embedded boxplots",
+      title = paste(condition_name, "Condition"),
       x = "Arrow Pattern",
       y = "Response Time (ms)"
     ) +
@@ -612,21 +620,921 @@ create_rt_violin_plot <- function(data, condition_name, max_rt) {
       axis.text.y = element_text(size = 10),
       axis.title = element_text(size = 12, face = "bold"),
       plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
-      plot.subtitle = element_text(size = 10, hjust = 0.5),
       strip.text = element_text(size = 11, face = "bold"),
       legend.position = "none",
       panel.grid.minor = element_blank()
     ) +
-    scale_y_continuous(breaks = seq(0, ceiling(max_rt/500)*500, 500), limits = c(150, max_rt)) +
-    coord_cartesian(ylim = c(150, max_rt))
+    scale_y_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
 }
 
-# Create violin plots
-rt_violin_fast <- create_rt_violin_plot(resp_ericsen_rapido, "Fast", max_rt_overall)
-rt_violin_slow <- create_rt_violin_plot(resp_ericsen_lento, "Slow", max_rt_overall)
+# Create plots
+rt_density_fast <- create_rt_density_plot(resp_ericsen_rapido_num, "Fast", min_rt_overall, max_rt_overall)
+rt_density_slow <- create_rt_density_plot(resp_ericsen_lento_num, "Slow", min_rt_overall, max_rt_overall)
+rt_violin_fast <- create_rt_violin_plot(resp_ericsen_rapido_num, "Fast", min_rt_overall, max_rt_overall)
+rt_violin_slow <- create_rt_violin_plot(resp_ericsen_lento_num, "Slow", min_rt_overall, max_rt_overall)
 
-# Display violin plots
-grid.arrange(rt_violin_fast, rt_violin_slow, ncol = 1, nrow = 2)
-
+# Arrange plots
+ggarrange(rt_density_fast, rt_density_slow,
+          rt_violin_fast, rt_violin_slow,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE)
 ```
 
+```{r flanker-individual-analysis}
+#| fig.height: 16
+#| fig.width: 14
+#| fig.cap: "Figure 4. Individual participant analysis for the Flanker task. (A-B) Mean response times and (C-D) trial counts for each participant across arrow patterns and response types. Heatmaps show individual differences in performance patterns."
+
+# Calculate summary statistics by subject
+summary_by_subject <- bind_rows(
+  resp_ericsen_rapido_num %>% mutate(condition = "Fast"),
+  resp_ericsen_lento_num %>% mutate(condition = "Slow")
+) %>%
+  group_by(Subject_label, condition, arrow_pattern, correct_response) %>%
+  summarise(
+    n_trials = n(),
+    mean_RT = mean(RT_ms, na.rm = TRUE),
+    median_RT = median(RT_ms, na.rm = TRUE),
+    sd_RT = sd(RT_ms, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(Subject_label, condition, correct_response, arrow_pattern)
+
+# Calculate RT scale limits
+all_mean_rt <- summary_by_subject$mean_RT[!is.na(summary_by_subject$mean_RT)]
+rt_min <- min(all_mean_rt)
+rt_max <- max(all_mean_rt)
+
+# Calculate count scale limits
+all_counts <- summary_by_subject$n_trials
+count_min <- min(all_counts)
+count_max <- max(all_counts)
+
+# Create RT heatmaps
+create_rt_heatmap <- function(data, condition_name, rt_min, rt_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, arrow_pattern, mean_RT) %>%
+    mutate(mean_RT_rounded = round(mean_RT, 0))
+
+  ggplot(heatmap_data, aes(x = arrow_pattern, y = Subject_label, fill = mean_RT)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = ifelse(is.na(mean_RT_rounded), "", mean_RT_rounded)), size = 3, color = "white") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "C", name = "Mean RT (ms)", limits = c(rt_min, rt_max)) +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create count heatmaps
+create_count_heatmap <- function(data, condition_name, count_min, count_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, arrow_pattern, n_trials) %>%
+    # Calculate total trials per subject and arrow pattern
+    group_by(Subject_label, arrow_pattern) %>%
+    mutate(
+      total_per_pattern = sum(n_trials),
+      percentage = round((n_trials / total_per_pattern) * 100, 1)
+    ) %>%
+    ungroup()
+
+  ggplot(heatmap_data, aes(x = arrow_pattern, y = Subject_label, fill = n_trials)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = paste0(n_trials, "(", percentage, "%)")), 
+              size = 2.5, color = "white", fontface = "bold") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "D", name = "Number of Trials", limits = c(count_min, count_max)) +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create all heatmaps
+heatmap_fast_rt <- create_rt_heatmap(summary_by_subject, "Fast", rt_min, rt_max)
+heatmap_slow_rt <- create_rt_heatmap(summary_by_subject, "Slow", rt_min, rt_max)
+heatmap_fast_count <- create_count_heatmap(summary_by_subject, "Fast", count_min, count_max)
+heatmap_slow_count <- create_count_heatmap(summary_by_subject, "Slow", count_min, count_max)
+
+# Arrange plots
+ggarrange(heatmap_fast_rt, heatmap_slow_rt,
+          heatmap_fast_count, heatmap_slow_count,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE)
+```
+
+```{r flanker-individual-rt-density}
+#| fig.height: 20
+#| fig.width: 14
+#| fig.cap: "Figure 5. Individual participant RT density distributions for the Flanker task. Panels show RT distributions for each participant separated by arrow pattern and response accuracy in (A-B) Fast and (C-D) Slow conditions."
+
+# Function to create RT density plot by subject for Flanker
+create_flanker_rt_density_by_subject <- function(data, condition_name, response_type, min_rt, max_rt) {
+  # Filter by response type
+  plot_data <- data %>%
+    filter(correct_response == response_type)
+  
+  # Create density plot
+  ggplot(plot_data, aes(x = RT_ms, color = arrow_pattern)) +
+    geom_density(alpha = 0.3, size = 0.8) +
+    facet_wrap(~ Subject_label, ncol = 6, scales = "free_y") +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition -", response_type, "Responses"),
+      subtitle = "RT Distribution by Participant and Arrow Pattern",
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 7),
+      axis.title = element_text(size = 10, face = "bold"),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 8, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/500)*500, ceiling(max_rt/500)*500, 1000), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Calculate min and max RT across both conditions
+all_rt <- c(resp_ericsen_rapido_num$RT_ms[resp_ericsen_rapido_num$RT_ms >= 150], 
+            resp_ericsen_lento_num$RT_ms[resp_ericsen_lento_num$RT_ms >= 150])
+min_rt_overall <- min(all_rt, na.rm = TRUE)
+max_rt_overall <- max(all_rt, na.rm = TRUE)
+
+# Create plots for Fast condition
+fast_correct <- create_flanker_rt_density_by_subject(resp_ericsen_rapido_num, "Fast", "Correct", 
+                                                     min_rt_overall, max_rt_overall)
+fast_incorrect <- create_flanker_rt_density_by_subject(resp_ericsen_rapido_num, "Fast", "Incorrect", 
+                                                       min_rt_overall, max_rt_overall)
+
+# Create plots for Slow condition
+slow_correct <- create_flanker_rt_density_by_subject(resp_ericsen_lento_num, "Slow", "Correct", 
+                                                     min_rt_overall, max_rt_overall)
+slow_incorrect <- create_flanker_rt_density_by_subject(resp_ericsen_lento_num, "Slow", "Incorrect", 
+                                                       min_rt_overall, max_rt_overall)
+
+# Display plots
+ggarrange(fast_correct, fast_incorrect,
+          slow_correct, slow_incorrect,
+          ncol = 1, nrow = 4,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE,
+          heights = c(1, 1, 1, 1))
+```
+
+# Go No-Go
+
+```{r gonogo-data-preprocessing}
+# Process Go/No-Go data - Fast condition
+gonogo_rapido_data[[1]] <- gonogo_rapido_data[[1]] %>% 
+  drop_na(Code) %>% 
+  filter(Individual != "WW")
+
+# Process Go/No-Go data - Slow condition
+gonogo_lento_data[[1]] <- gonogo_lento_data[[1]] %>% 
+  drop_na(Code) %>% 
+  filter(Individual != "WW")
+
+# Function to get stimulus type label
+get_stimulus_type <- function(code) {
+  case_when(
+    code == 22 ~ "Go",
+    code == 33 ~ "No-Go",
+    TRUE ~ NA_character_
+  )
+}
+
+# Process Fast condition data
+gonogo_rapido_data_t <- gonogo_rapido_data[[1]] %>% 
+  group_by(Individual) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Individual, group_trial) %>%
+  mutate(
+    stimulus_code = as.numeric(Code[`Event Type` == "Picture"][1]),
+    stimulus_type = factor(get_stimulus_type(stimulus_code), levels = c("Go", "No-Go")),
+    response_present = any(`Event Type` == "Response"),
+    correct_answer = case_when(
+      stimulus_type == "Go" & response_present ~ 1,
+      stimulus_type == "No-Go" & !response_present ~ 1,
+      TRUE ~ 0
+    )
+  ) %>% 
+  ungroup() %>%
+  group_by(Individual, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Process responses for Fast condition
+resp_gonogo_rapido <- gonogo_rapido_data_t %>% 
+  filter(`Event Type` == "Response") %>%
+  mutate(
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>%
+  ungroup() %>%
+  group_by(Individual, group_trial) %>%
+  filter(
+    RT_ms >= 150 &
+    RT_ms <= 2000
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Add No-Go trials without responses (correct rejections)
+nogo_correct_rapido <- gonogo_rapido_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "No-Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(1, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Add Go trials without responses (misses)
+go_incorrect_rapido <- gonogo_rapido_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(0, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Combine all trials for Fast condition
+resp_gonogo_rapido_all <- bind_rows(resp_gonogo_rapido, nogo_correct_rapido, go_incorrect_rapido) %>%
+  arrange(Individual, group_trial)
+
+# Process Slow condition data
+gonogo_lento_data_t <- gonogo_lento_data[[1]] %>% 
+  group_by(Individual) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Individual, group_trial) %>%
+  mutate(
+    stimulus_code = as.numeric(Code[`Event Type` == "Picture"][1]),
+    stimulus_type = factor(get_stimulus_type(stimulus_code), levels = c("Go", "No-Go")),
+    response_present = any(`Event Type` == "Response"),
+    correct_answer = case_when(
+      stimulus_type == "Go" & response_present ~ 1,
+      stimulus_type == "No-Go" & !response_present ~ 1,
+      TRUE ~ 0
+    )
+  ) %>% 
+  ungroup() %>%
+  group_by(Individual, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Process responses for Slow condition
+resp_gonogo_lento <- gonogo_lento_data_t %>% 
+  filter(`Event Type` == "Response") %>%
+  mutate(
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>%
+  ungroup() %>%
+  group_by(Individual, group_trial) %>%
+  filter(
+    RT_ms >= 150 &
+    RT_ms <= 4500
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Add No-Go trials without responses (correct rejections)
+nogo_correct_lento <- gonogo_lento_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "No-Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(1, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Add Go trials without responses (misses)
+go_incorrect_lento <- gonogo_lento_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(0, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Combine all trials for Slow condition
+resp_gonogo_lento_all <- bind_rows(resp_gonogo_lento, nogo_correct_lento, go_incorrect_lento) %>%
+  arrange(Individual, group_trial)
+
+# Add subject numbers using global mapping
+resp_gonogo_rapido_num <- create_subject_numbered_data(resp_gonogo_rapido_all, "Individual")
+resp_gonogo_lento_num <- create_subject_numbered_data(resp_gonogo_lento_all, "Individual")
+```
+
+```{r gonogo-accuracy-analysis}
+#| fig.height: 8
+#| fig.width: 10
+#| fig.cap: "Figure 6. Distribution of correct and incorrect responses in the Go/No-Go task. (A) Fast condition and (B) Slow condition show the frequency and percentage of responses for Go and No-Go trials."
+
+# Create heatmap function for Go/No-Go
+create_gonogo_heatmap <- function(data, condition_name, color_palette) {
+  heatmap_data <- data %>%
+    group_by(stimulus_type, correct_response) %>%
+    summarise(
+      frequency = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(stimulus_type) %>%
+    mutate(
+      total = sum(frequency),
+      percentage = round((frequency / total) * 100, 1)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      label = paste0(frequency, "(", percentage, "%)")
+    )
+  
+  p <- ggplot(heatmap_data, aes(x = stimulus_type, y = correct_response, fill = frequency)) +
+    geom_tile(color = "white", size = 1) +
+    geom_text(aes(label = label), size = 4, color = "white", fontface = "bold") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Stimulus Type",
+      y = "Response"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12, face = "bold"),
+      axis.text.y = element_text(size = 10, face = "bold"),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      panel.grid = element_blank()
+    )
+
+  if (condition_name == "Fast") {
+    p + scale_fill_viridis(option = "A", name = "Frequency", begin = 0, end = 0.8)
+  } else {
+    p + scale_fill_viridis(option = "C", name = "Frequency")
+  }
+}
+
+# Create heatmaps
+heatmap_fast_gonogo <- create_gonogo_heatmap(resp_gonogo_rapido_num, "Fast", "A")
+heatmap_slow_gonogo <- create_gonogo_heatmap(resp_gonogo_lento_num, "Slow", "C")
+
+ggarrange(heatmap_fast_gonogo, heatmap_slow_gonogo, 
+          ncol = 1, nrow = 2,
+          labels = c("A", "B"),
+          common.legend = FALSE)
+```
+
+```{r gonogo-trial-progression}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Figure 7. Trial-by-trial analysis of the Go/No-Go task. (A-B) Response distribution across trials for Go and No-Go stimuli. (C-D) Distribution of stimulus types across trials. (E-F) Error rates showing performance changes over time."
+
+# Create stacked bar chart for Go/No-Go
+create_gonogo_stacked_bar <- function(data, condition_name) {
+  full_data <- if(condition_name == "Fast") {
+    gonogo_rapido_data_t
+  } else {
+    gonogo_lento_data_t
+  }
+  
+  trial_data <- full_data %>%
+    filter(`Event Type` == "Picture") %>%
+    select(Individual, group_trial, stimulus_type) %>%
+    distinct()
+  
+  bar_data <- data %>%
+    select(Individual, group_trial, correct_response, stimulus_type) %>%
+    left_join(trial_data %>% select(Individual, group_trial), 
+              by = c("Individual" = "Individual", "group_trial" = "group_trial")) %>%
+    group_by(group_trial, stimulus_type, correct_response) %>%
+    summarise(
+      count = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(group_trial, stimulus_type) %>%
+    mutate(
+      total = sum(count),
+      percentage = (count / total) * 100
+    ) %>%
+    ungroup()
+  
+  ggplot(bar_data, aes(x = group_trial, y = percentage, fill = correct_response)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.8) +
+    facet_wrap(~ stimulus_type, ncol = 2, scales = "free_x") +
+    scale_fill_manual(values = c("Incorrect" = "#E74C3C", "Correct" = "#27AE60"),
+                      name = "Response") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Percentage (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "top",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 25), limits = c(0, 100))
+}
+
+# Create stimulus distribution plot
+create_stimulus_distribution <- function(data, condition_name) {
+  full_data <- if(condition_name == "Fast") {
+    gonogo_rapido_data_t
+  } else {
+    gonogo_lento_data_t
+  }
+  
+  stimulus_data <- full_data %>%
+    filter(`Event Type` == "Picture") %>%
+    select(Trial, stimulus_type) %>%
+    distinct()
+  
+  ggplot(stimulus_data, aes(x = Trial, color = stimulus_type, fill = stimulus_type)) +
+    geom_density(alpha = 0.3, size = 1, adjust = 1.5) +
+    scale_color_manual(values = c("Go" = "#2E86AB", "No-Go" = "#E74C3C"),
+                       name = "Stimulus Type") +
+    scale_fill_manual(values = c("Go" = "#2E86AB", "No-Go" = "#E74C3C"),
+                      name = "Stimulus Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# Create error rate plot
+create_error_rate_plot <- function(data, condition_name) {
+  error_data <- data %>%
+    group_by(Trial, stimulus_type) %>%
+    summarise(
+      total = n(),
+      error_count = sum(correct_response == "Incorrect"),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      error_percentage = (error_count / total) * 100
+    ) %>%
+    complete(Trial, stimulus_type, fill = list(error_percentage = NA)) %>%
+    filter(!is.na(error_percentage))
+  
+  ggplot(error_data, aes(x = Trial, y = error_percentage, color = stimulus_type)) +
+    geom_smooth(method = "loess", span = 0.3, se = TRUE, alpha = 0.2, size = 1) +
+    geom_point(alpha = 0.3, size = 1) +
+    scale_color_manual(values = c("Go" = "#2E86AB", "No-Go" = "#E74C3C"),
+                       name = "Stimulus Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Error Rate (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 20), limits = c(0, 100))
+}
+
+# Create plots
+stacked_fast_gonogo <- create_gonogo_stacked_bar(resp_gonogo_rapido_num, "Fast")
+stacked_slow_gonogo <- create_gonogo_stacked_bar(resp_gonogo_lento_num, "Slow")
+stimulus_fast <- create_stimulus_distribution(resp_gonogo_rapido_num, "Fast")
+stimulus_slow <- create_stimulus_distribution(resp_gonogo_lento_num, "Slow")
+error_fast <- create_error_rate_plot(resp_gonogo_rapido_num, "Fast")
+error_slow <- create_error_rate_plot(resp_gonogo_lento_num, "Slow")
+
+# Arrange plots
+ggarrange(stacked_fast_gonogo, stacked_slow_gonogo,
+          stimulus_fast, stimulus_slow,
+          error_fast, error_slow,
+          ncol = 2, nrow = 3,
+          labels = c("A", "B", "C", "D", "E", "F"),
+          common.legend = FALSE)
+```
+
+```{r gonogo-rt-distributions}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Figure 8. Response time distributions in the Go/No-Go task. (A-B) Density plots showing RT distributions for Go hits and No-Go false alarms. (C-D) Violin plots with embedded boxplots showing RT distributions for each response type."
+
+# Filter only trials with responses for RT analysis
+resp_gonogo_rapido_rt <- resp_gonogo_rapido_num %>% filter(!is.na(RT_ms))
+resp_gonogo_lento_rt <- resp_gonogo_lento_num %>% filter(!is.na(RT_ms))
+
+# Calculate RT limits
+if(nrow(resp_gonogo_rapido_rt) > 0 & nrow(resp_gonogo_lento_rt) > 0) {
+  min_rt_gonogo <- min(c(resp_gonogo_rapido_rt$RT_ms, resp_gonogo_lento_rt$RT_ms), na.rm = TRUE)
+  max_rt_gonogo <- max(c(resp_gonogo_rapido_rt$RT_ms, resp_gonogo_lento_rt$RT_ms), na.rm = TRUE)
+} else {
+  min_rt_gonogo <- 150
+  max_rt_gonogo <- 2000
+}
+
+# RT density plot for Go/No-Go
+create_gonogo_rt_density <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data %>% 
+    filter(!is.na(RT_ms)) %>%
+    filter(!(stimulus_type == "Go" & correct_response == "Incorrect")) %>%
+    filter(!(stimulus_type == "No-Go" & correct_response == "Correct"))
+  
+  if(nrow(rt_data) == 0) {
+    return(
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No RT data available", size = 6) +
+        theme_void() +
+        labs(title = paste(condition_name, "Condition - No RT Data"))
+    )
+  }
+  
+  rt_data <- rt_data %>%
+    mutate(
+      response_type = case_when(
+        stimulus_type == "Go" & correct_response == "Correct" ~ "Go Hit",
+        stimulus_type == "No-Go" & correct_response == "Incorrect" ~ "No-Go False Alarm",
+        TRUE ~ "Other"
+      )
+    )
+  
+  ggplot(rt_data, aes(x = RT_ms, fill = response_type, color = response_type)) +
+    geom_density(alpha = 0.3, size = 1) +
+    scale_fill_manual(values = c("Go Hit" = "#2E86AB", 
+                                 "No-Go False Alarm" = "#E74C3C"),
+                      name = "Response Type") +
+    scale_color_manual(values = c("Go Hit" = "#2E86AB", 
+                                  "No-Go False Alarm" = "#E74C3C"),
+                       name = "Response Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create RT violin plot
+create_gonogo_rt_violin <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data %>% 
+    filter(!is.na(RT_ms)) %>%
+    filter(!(stimulus_type == "Go" & correct_response == "Incorrect")) %>%
+    filter(!(stimulus_type == "No-Go" & correct_response == "Correct"))
+  
+  if(nrow(rt_data) == 0) {
+    return(
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No RT data available", size = 6) +
+        theme_void() +
+        labs(title = paste(condition_name, "Condition - No RT Data"))
+    )
+  }
+  
+  rt_data <- rt_data %>%
+    mutate(
+      response_type = case_when(
+        stimulus_type == "Go" & correct_response == "Correct" ~ "Go Hit",
+        stimulus_type == "No-Go" & correct_response == "Incorrect" ~ "No-Go False Alarm",
+        TRUE ~ "Other"
+      )
+    )
+  
+  ggplot(rt_data, aes(x = response_type, y = RT_ms, fill = response_type)) +
+    geom_violin(alpha = 0.7, scale = "width") +
+    geom_boxplot(width = 0.1, alpha = 0.8, outlier.size = 1) +
+    scale_fill_manual(values = c("Go Hit" = "#2E86AB", 
+                                 "No-Go False Alarm" = "#E74C3C"),
+                      name = "Response Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Response Type",
+      y = "Response Time (ms)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, face = "bold"),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "none",
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create plots
+rt_density_fast_gonogo <- create_gonogo_rt_density(resp_gonogo_rapido_rt, "Fast", min_rt_gonogo, max_rt_gonogo)
+rt_density_slow_gonogo <- create_gonogo_rt_density(resp_gonogo_lento_rt, "Slow", min_rt_gonogo, max_rt_gonogo)
+rt_violin_fast_gonogo <- create_gonogo_rt_violin(resp_gonogo_rapido_rt, "Fast", min_rt_gonogo, max_rt_gonogo)
+rt_violin_slow_gonogo <- create_gonogo_rt_violin(resp_gonogo_lento_rt, "Slow", min_rt_gonogo, max_rt_gonogo)
+
+# Arrange plots
+ggarrange(rt_density_fast_gonogo, rt_density_slow_gonogo,
+          rt_violin_fast_gonogo, rt_violin_slow_gonogo,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE)
+```
+
+```{r gonogo-individual-rt-density}
+#| fig.height: 20
+#| fig.width: 14
+#| fig.cap: "Figure 9. Individual participant RT density distributions for the Go/No-Go task. Panels show RT distributions for each participant separated by response type (Go Hit vs No-Go False Alarm) in (A-B) Fast and (C-D) Slow conditions."
+
+# Function to create RT density plot by subject for Go/No-Go
+create_gonogo_rt_density_by_subject <- function(data, condition_name, response_type, min_rt, max_rt) {
+  # Filter by response type
+  plot_data <- data %>%
+    filter(!is.na(RT_ms)) %>%
+    mutate(
+      response_category = case_when(
+        stimulus_type == "Go" & correct_response == "Correct" ~ "Go Hit",
+        stimulus_type == "No-Go" & correct_response == "Incorrect" ~ "No-Go False Alarm",
+        TRUE ~ "Other"
+      )
+    ) %>%
+    filter(response_category == response_type)
+  
+  if(nrow(plot_data) == 0) {
+    return(
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = paste("No", response_type, "data"), size = 6) +
+        theme_void() +
+        labs(title = paste(condition_name, "Condition -", response_type))
+    )
+  }
+  
+  # Create density plot
+  ggplot(plot_data, aes(x = RT_ms, color = response_category, fill = response_category)) +
+    geom_density(alpha = 0.3, size = 0.8) +
+    facet_wrap(~ Subject_label, ncol = 6, scales = "free_y") +
+    scale_color_manual(values = c("Go Hit" = "#2E86AB", 
+                                  "No-Go False Alarm" = "#E74C3C"),
+                       name = "Response Type") +
+    scale_fill_manual(values = c("Go Hit" = "#2E86AB", 
+                                 "No-Go False Alarm" = "#E74C3C"),
+                      name = "Response Type") +
+    labs(
+      title = paste(condition_name, "Condition -", response_type),
+      subtitle = "RT Distribution by Participant",
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 7),
+      axis.title = element_text(size = 10, face = "bold"),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 8, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/500)*500, ceiling(max_rt/500)*500, 1000), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create plots for Fast condition
+fast_go_hits <- create_gonogo_rt_density_by_subject(resp_gonogo_rapido_num, "Fast", "Go Hit", 
+                                                    min_rt_gonogo, max_rt_gonogo)
+fast_false_alarms <- create_gonogo_rt_density_by_subject(resp_gonogo_rapido_num, "Fast", "No-Go False Alarm", 
+                                                         min_rt_gonogo, max_rt_gonogo)
+
+# Create plots for Slow condition
+slow_go_hits <- create_gonogo_rt_density_by_subject(resp_gonogo_lento_num, "Slow", "Go Hit", 
+                                                    min_rt_gonogo, max_rt_gonogo)
+slow_false_alarms <- create_gonogo_rt_density_by_subject(resp_gonogo_lento_num, "Slow", "No-Go False Alarm", 
+                                                         min_rt_gonogo, max_rt_gonogo)
+
+# Display plots
+ggarrange(fast_go_hits, fast_false_alarms,
+          slow_go_hits, slow_false_alarms,
+          ncol = 1, nrow = 4,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE,
+          heights = c(1, 1, 1, 1))
+```
+
+```{r gonogo-individual-analysis}
+#| fig.height: 16
+#| fig.width: 14
+#| fig.cap: "Figure 10. Individual participant analysis for the Go/No-Go task. (A) Signal detection performance plot showing hit rates vs false alarm rates. (B-C) Mean response times and (D-E) trial counts for each participant across stimulus types and response accuracy."
+
+# Calculate performance metrics by subject
+gonogo_summary_by_subject <- bind_rows(
+  resp_gonogo_rapido_num %>% mutate(condition = "Fast"),
+  resp_gonogo_lento_num %>% mutate(condition = "Slow")
+) %>%
+  group_by(Subject_label, condition, stimulus_type, correct_response) %>%
+  summarise(
+    n_trials = n(),
+    mean_RT = mean(RT_ms, na.rm = TRUE),
+    median_RT = median(RT_ms, na.rm = TRUE),
+    sd_RT = sd(RT_ms, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(Subject_label, condition, stimulus_type, correct_response)
+
+# Calculate hit rate and false alarm rate
+signal_detection_metrics <- bind_rows(
+  resp_gonogo_rapido_num %>% mutate(condition = "Fast"),
+  resp_gonogo_lento_num %>% mutate(condition = "Slow")
+) %>%
+  group_by(Subject_label, condition) %>%
+  summarise(
+    hits = sum(stimulus_type == "Go" & correct_response == "Correct"),
+    misses = sum(stimulus_type == "Go" & correct_response == "Incorrect"),
+    false_alarms = sum(stimulus_type == "No-Go" & correct_response == "Incorrect"),
+    correct_rejections = sum(stimulus_type == "No-Go" & correct_response == "Correct"),
+    hit_rate = hits / (hits + misses),
+    false_alarm_rate = false_alarms / (false_alarms + correct_rejections),
+    .groups = 'drop'
+  )
+
+# Create signal detection plot
+sdt_plot <- ggplot(signal_detection_metrics, aes(x = false_alarm_rate, y = hit_rate, color = condition)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text(aes(label = Subject_label), size = 2.5, nudge_x = 0.02, nudge_y = 0.02) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.5) +
+  scale_color_manual(values = c("Fast" = "#E74C3C", "Slow" = "#3498DB"),
+                     name = "Condition") +
+  labs(
+    title = "Signal Detection Performance - Go/No-Go Task",
+    x = "False Alarm Rate",
+    y = "Hit Rate"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.position = "bottom"
+  ) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2))
+
+# Calculate scale limits
+gonogo_rt_vals <- gonogo_summary_by_subject$mean_RT[!is.na(gonogo_summary_by_subject$mean_RT)]
+if(length(gonogo_rt_vals) > 0) {
+  gonogo_rt_min <- min(gonogo_rt_vals)
+  gonogo_rt_max <- max(gonogo_rt_vals)
+} else {
+  gonogo_rt_min <- 200
+  gonogo_rt_max <- 1000
+}
+
+count_min_gonogo <- 0
+count_max_gonogo <- max(gonogo_summary_by_subject$n_trials)
+
+# Create RT heatmap function for Go/No-Go
+create_gonogo_rt_heatmap <- function(data, condition_name, rt_min, rt_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, stimulus_type, mean_RT) %>%
+    mutate(mean_RT_rounded = round(mean_RT, 0))
+
+  ggplot(heatmap_data, aes(x = stimulus_type, y = Subject_label, fill = mean_RT)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = ifelse(is.na(mean_RT_rounded), "", mean_RT_rounded)), size = 3, color = "white") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "C", name = "Mean RT (ms)", limits = c(rt_min, rt_max), na.value = "grey50") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Stimulus Type",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create count heatmap function for Go/No-Go
+create_gonogo_count_heatmap <- function(data, condition_name, count_min, count_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, stimulus_type, n_trials) %>%
+    # Calculate total trials per subject and stimulus type
+    group_by(Subject_label, stimulus_type) %>%
+    mutate(
+      total_per_stimulus = sum(n_trials),
+      percentage = round((n_trials / total_per_stimulus) * 100, 1)
+    ) %>%
+    ungroup()
+
+  ggplot(heatmap_data, aes(x = stimulus_type, y = Subject_label, fill = n_trials)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = paste0(n_trials, "(", percentage, "%)")), 
+              size = 2.5, color = "white", fontface = "bold") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "D", name = "Number of Trials", limits = c(count_min, count_max)) +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Stimulus Type",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create all heatmaps
+heatmap_fast_rt_gonogo <- create_gonogo_rt_heatmap(gonogo_summary_by_subject, "Fast", gonogo_rt_min, gonogo_rt_max)
+heatmap_slow_rt_gonogo <- create_gonogo_rt_heatmap(gonogo_summary_by_subject, "Slow", gonogo_rt_min, gonogo_rt_max)
+heatmap_fast_count_gonogo <- create_gonogo_count_heatmap(gonogo_summary_by_subject, "Fast", count_min_gonogo, count_max_gonogo)
+heatmap_slow_count_gonogo <- create_gonogo_count_heatmap(gonogo_summary_by_subject, "Slow", count_min_gonogo, count_max_gonogo)
+
+# Arrange plots
+ggarrange(sdt_plot, NULL,
+          heatmap_fast_rt_gonogo, heatmap_slow_rt_gonogo,
+          heatmap_fast_count_gonogo, heatmap_slow_count_gonogo,
+          ncol = 2, nrow = 3,
+          labels = c("A", "", "B", "C", "D", "E"),
+          common.legend = FALSE,
+          heights = c(0.8, 1, 1))
+```
