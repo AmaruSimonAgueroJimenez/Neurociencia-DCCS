@@ -154,6 +154,8 @@ complete_data <- bind_rows(data_fast, data_slow) %>%
     group_split()
 complete_data
 
+write_rds(x = complete_data, file = "../data/complete_data.rds")
+
 # fit all subjects x task conditions
 
 start_params <- c(
@@ -163,6 +165,7 @@ start_params <- c(
     delta = 1.0
 )
 
+set.seed(666)
 fit_list <- complete_data %>%
     map_dfr(., function(X) {
         final_fit <- optim(
