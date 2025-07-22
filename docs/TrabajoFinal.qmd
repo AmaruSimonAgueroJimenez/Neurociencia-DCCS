@@ -1,0 +1,2652 @@
+---
+title: |
+  \begin{center}
+    \includegraphics[height=1.5cm]{logo2.png} \\[1cm]
+    \Large Trabajo Final Neurociencias: \\ Estudio neurocomputacional del control cognitivo reactivo a través de paradigmas de Conflicto e Inhibición
+  \end{center}
+author:
+  - name: "Amaru Simón Agüero Jiménez"
+    email: "aaguero@miaundes.cl"
+    orcid: "0000-0001-7336-1833"
+date: "`r Sys.Date()`"
+lang: es
+reference-section-title: "Referencias"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+    documentclass: article
+    fontsize: 10pt
+    mainfont: "Arial"
+    bibliography: ref.bib
+    csl: apa-numeric-superscript.csl
+    keep-tex: true
+    header-includes: |
+      % Paquetes necesarios
+      \usepackage{amsmath}
+      \usepackage{amssymb}
+      \usepackage{graphicx}
+      \usepackage{fancyhdr}
+      \usepackage{geometry}
+      \usepackage{booktabs}
+      \usepackage{dcolumn}
+      \usepackage{array}
+      \newcolumntype{d}[1]{D{.}{.}{#1}}
+      \usepackage{float}
+      \usepackage{adjustbox}
+      % Paquete para controlar captions
+      \usepackage{caption}
+      % Fuente tiny para captions de figuras
+      \captionsetup[figure]{font=scriptsize}
+      
+      % Configuración de márgenes
+      \geometry{
+        a4paper,
+        left=1.5cm,
+        right=1.5cm,
+        top=1.5cm,
+        bottom=2.5cm,
+        includeheadfoot
+      }
+
+      % Configuración de encabezado y pie de página
+      \pagestyle{fancy}
+      \fancyhf{} % Limpia encabezado y pie de página
+      
+      % Encabezado
+      \lhead{\includegraphics[height=1cm]{logo2.png}} % Logo en el encabezado
+      \chead{}
+      \rhead{\small Trabajo Final Neurociencias}
+
+      % Ajuste de separación entre encabezado y contenido
+      \setlength{\headheight}{2cm} % Altura del encabezado
+      \setlength{\headsep}{1.5cm} % Distancia entre encabezado y contenido
+
+      % Pie de página
+      \lfoot{}
+      \cfoot{\thepage} % Número de página centrado
+      \rfoot{}
+      
+# Configuración de ejecución
+execute:
+  echo: false     # No mostrar código
+  warning: false  # Sin advertencias
+  message: false  # Sin mensajes
+  results: 'asis'
+  fig-pos: 'H'
+  fig-align: 'center'
+---
+
+
+```{r setup}
+#| message: false
+#| warning: false
+
+# Function to install and load packages
+install_and_load <- function(package) {
+  if (!require(package, character.only = TRUE)) {
+    utils::install.packages(package)
+    library(package, character.only = TRUE)
+  }
+}
+
+# Complete list of required packages
+packages <- c(
+  # Original packages
+  "tidyverse",      # Data manipulation and visualization
+  "loo",            # Leave-One-Out cross-validation
+  "coda",           # MCMC chain analysis
+  "lme4",           # Mixed models
+  "rstatix",        # Additional statistics
+  "knitr",          # Reports
+  "kableExtra",     # Enhanced tables
+  "scales",         # Graph scales
+  "patchwork",      # Combine plots
+  "viridis",        # Color palettes
+  "gridExtra",      # Plot organization
+  "ggpubr",        # Publication-ready plots"
+  "ggdist",
+  "RWiener",
+  
+  # Additional packages for DDM analysis
+  "brms",           # Bayesian models
+  "rtdists",        # DDM functions
+  "bayesplot",      # Bayesian visualization
+  "posterior"       # Posterior handling
+)
+
+# Install and load all packages
+invisible(capture.output(sapply(packages, install_and_load)))
+
+# Special installation for cmdstanr (required for brms)
+if (!require("cmdstanr", quietly = TRUE)) {
+  # Install cmdstanr from specific repository
+  install.packages("cmdstanr", 
+                   repos = c("https://mc-stan.org/r-packages/", 
+                            getOption("repos")))
+  library(cmdstanr)
+  
+  # Check and install CmdStan if necessary
+  tryCatch({
+    cmdstanr::cmdstan_version()
+  }, error = function(e) {
+    message("CmdStan is not installed. Installing CmdStan...")
+    cmdstanr::check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
+    cmdstanr::install_cmdstan(quiet = TRUE)
+  })
+}
+
+# Configure brms options
+options(brms.backend = "cmdstanr")
+options(mc.cores = parallel::detectCores() - 1)
+```
+
+```{r data-loading}
+#| message: false
+#| warning: false
+# --- Load and Process Experimental Task Data (Corrected Version) ---
+#
+# Description:
+# This script is designed to process .log files containing TWO data tables.
+# 1. Searches for files for each task (ericsen, Go/No-Go) and condition (slow, fast).
+# 2. Reads BOTH sections of each file: trial log and summary table.
+# 3. Stores data in separate data frames for each section and condition.
+# 4. Adds important metadata such as subject ID, task, and condition.
+# 5. Saves the resulting 8 data frames as .rds and .csv files.
+
+# --- 1. Initial Setup ---
+
+# DEFINE MAIN PATH
+carpeta_principal <- "G:/My Drive/DCCS/Neurociencia Social/Neurociencia-DCCS/data/data trabajo"
+
+# --- 2. Enhanced Reading Function ---
+
+# Function that reads BOTH tables from a .log file
+read_dual_log_file <- function(filepath) {
+  # Read all lines from file
+  lines <- readLines(filepath, warn = FALSE)
+  
+  # Find headers for both tables
+  header1_index <- which(str_starts(lines, fixed("Subject\tTrial\tEvent Type")))
+  header2_index <- which(str_starts(lines, fixed("Event Type\tCode\tType")))
+  
+  # Validate that both headers exist
+  if (length(header1_index) == 0 || length(header2_index) == 0) {
+    warning(paste("Both headers not found in file:", basename(filepath)))
+    return(NULL)
+  }
+  
+  # --- Reading First Table (Trial Log) ---
+  # Skip metadata lines until first header
+  # Read until line before second header
+  rows_to_read_part1 <- header2_index - header1_index - 2
+  
+  df_part1 <- read_tsv(
+    filepath,
+    skip = header1_index -1,
+    n_max = rows_to_read_part1,
+    col_types = cols(.default = "c"), # Read everything as character
+    show_col_types = FALSE,
+    lazy = FALSE
+  )
+  
+  # --- Reading Second Table (Summary) ---
+  df_part2 <- read_tsv(
+    filepath,
+    skip = header2_index - 1,
+    col_types = cols(.default = "c"), # Read everything as character
+    show_col_types = FALSE,
+    lazy = FALSE
+  )
+
+  # Return a list with both data frames
+  return(list(log_data = df_part1, summary_data = df_part2))
+}
+
+
+# --- 3. Generic Processing Function ---
+
+process_task_files <- function(folder_path, task_name, speed) {
+  
+  # Define file search pattern based on task and speed
+  pattern <- case_when(
+    task_name == "ericsen" && speed == "lento"   ~ "Ericsen_FT_lentp?\\.log$",
+    task_name == "ericsen" && speed == "rapido"  ~ "Ericsen_FT_rapidp?\\.log$",
+    task_name == "GoNoGo"  && speed == "lento"   ~ "gonogo_FZ2R\\.log$",
+    task_name == "GoNoGo"  && speed == "rapido"  ~ "gonogo_FZR\\.log$",
+    TRUE                                        ~ ""
+  )
+  
+  # Search for files recursively
+  files <- list.files(folder_path, pattern = pattern, recursive = TRUE, full.names = TRUE)
+
+  
+  # Use `purrr::map` to process each file and handle errors
+  all_results <- files %>%
+    set_names(basename(dirname(.))) %>% # Name list with subject ID
+    map(safely(read_dual_log_file))
+
+  # Separate successful results from errors
+  successful_results <- all_results %>% keep(~is.null(.x$error)) %>% map("result")
+  failed_results <- all_results %>% keep(~!is.null(.x$error))
+
+  if (length(failed_results) > 0) {
+      cat("Files with errors (omitted):", length(failed_results), "\n")
+  }
+
+  # Combine data frames from first table (log)
+  log_data_combined <- map_df(successful_results, "log_data", .id = "Individual")
+  
+  # Combine data frames from second table (summary)
+  summary_data_combined <- map_df(successful_results, "summary_data", .id = "Individual")
+  
+  # Internal function to clean and convert data types
+  clean_and_convert <- function(df) {
+      if(nrow(df) == 0) return(df)
+      # Convert columns to numeric, ignoring errors
+      df %>% mutate(across(any_of(c("Trial", "Code", "Time", "TTime", "Uncertainty", "Duration", "ReqTime", "ReqDur", "RT")), 
+                           ~as.numeric(as.character(.))))
+  }
+
+  # Return a list with both combined and clean data frames
+  list(
+    log_data = clean_and_convert(log_data_combined),
+    summary_data = clean_and_convert(summary_data_combined)
+  )
+}
+
+
+# ============================================
+# 4. PROCESS ALL FILES
+# ============================================
+
+# Process Flanker task
+ericsen_lento_data <- process_task_files(carpeta_principal, "ericsen", "lento")
+ericsen_rapido_data <- process_task_files(carpeta_principal, "ericsen", "rapido")
+
+# Process Go/No-Go
+gonogo_lento_data <- process_task_files(carpeta_principal, "GoNoGo", "lento")
+gonogo_rapido_data <- process_task_files(carpeta_principal, "GoNoGo", "rapido")
+
+# ============================================
+# 5. SAVE RESULTS
+# ============================================
+
+output_folder <- file.path(carpeta_principal, "resultados_procesados_completos")
+if (!dir.exists(output_folder)) {
+  dir.create(output_folder)
+}
+
+# Function to save RDS and CSV files
+save_data <- function(data_list, task_name, speed, folder) {
+  # Save log data
+  saveRDS(data_list$log_data, file.path(folder, paste0(task_name, "_", speed, "_log.rds")))
+  write.csv(data_list$log_data, file.path(folder, paste0(task_name, "_", speed, "_log.csv")), row.names = FALSE)
+  
+  # Save summary data
+  saveRDS(data_list$summary_data, file.path(folder, paste0(task_name, "_", speed, "_summary.rds")))
+  write.csv(data_list$summary_data, file.path(folder, paste0(task_name, "_", speed, "_summary.csv")), row.names = FALSE)
+}
+
+# Save all results
+save_data(ericsen_lento_data, "ericsen", "lento", output_folder)
+save_data(ericsen_rapido_data, "ericsen", "rapido", output_folder)
+save_data(gonogo_lento_data, "gonogo", "lento", output_folder)
+save_data(gonogo_rapido_data, "gonogo", "rapido", output_folder)
+
+```
+
+\newpage
+
+# Introducción
+
+El control cognitivo se refiere al conjunto de procesos mentales de orden superior que permiten un comportamiento flexible y dirigido a objetivos, particularmente en presencia de información distractora o de tendencias de respuestas pero inapropiadas [@bin_xuan_e5601822]. Estos mecanismos son fundamentales para el comportamiento humano adaptativo, permitiendo a los individuos anular impulsos automáticos, cambiar entre tareas, actualizar información en la memoria de trabajo y resolver conflictos. Dentro del amplio dominio del control cognitivo, dos componentes son de importancia central para la investigación actual: el monitoreo de conflictos y la inhibición de la respuesta [@vincent_van_veen_623ca8c2]
+
+El monitoreo y resolución de conflictos se refiere a la aptitud para identificar la influencia de información no pertinente para la tarea, así como para activar mecanismos de control con el fin de mitigarla, garantizando de este modo que el comportamiento se mantenga en consonancia con los objetivos establecidos [@joel_t__nigg_4e13416b]. Este proceso se estudia clásicamente utilizando paradigmas como la Tarea Flanker de Eriksen, donde los participantes deben responder a un objetivo central mientras ignoran información conflictiva de distractores adyacentes, conocidos como flancos [@mathieu_servant_1e072bdf] La eficiencia de este sistema a menudo se indexa por el "Efecto de Compatibilidad Flanker" (FCE, por sus siglas en inglés), donde las respuestas son más lentas y menos precisas cuando los flancos son incongruentes con el objetivo en comparación con cuando son congruentes [@uwe_mattler_4218d365; @jason_s__mccarley_a8122c76]
+
+La inhibición de la respuesta, por el contrario, es la capacidad de suprimir o cancelar por completo una acción planificada o en curso [@parker_smith_20e8abc9]. Esta forma de control es crítica para adaptarse a las demandas ambientales cambiantes y para reprimir comportamientos socialmente inapropiados o contextualmente incorrectos [@veit_stuphorn_5e0ec677]. La tarea Go/No-Go es un paradigma canónico para evaluar la inhibición de la respuesta, requiriendo que los participantes ejecuten una respuesta "Go" frecuente, pero que retengan esta acción en ensayos "No-Go" infrecuentes [@kurt_p__schulz_7548e7a1]. Los fallos de inhibición en esta tarea, conocidos como "falsas alarmas", proporcionan una medida directa de la capacidad de control inhibitorio de un individuo [@adrian_meule_6ae101b8].
+
+La ejecución del control cognitivo no es monolítica; puede desplegarse en al menos dos modos temporales distintos: control proactivo y reactivo. El control proactivo implica el mantenimiento sostenido y anticipatorio de información relevante para el objetivo para prepararse para las próximas demandas cognitivas. Es un modo de control persistente que sesga la atención y la selección de acciones por adelantado [@gizem_arabac__f3afab2d]. En contraste, el control reactivo es un mecanismo transitorio, "justo a tiempo", que se recluta solo cuando se detecta un evento de alto conflicto o una necesidad de inhibición. Las manipulaciones experimentales que varían el tiempo disponible para la preparación, como alterar el intervalo entre estímulos (ISI), pueden cambiar sistemáticamente la dependencia de estos dos modos [@marion_criaud_abbe9f29]. Los ISI más cortos (condiciones rápidas) limitan la oportunidad de preparación proactiva, forzando una mayor dependencia de mecanismos de control reactivo rápidos para manejar el conflicto a medida que surge . El diseño experimental bajo consideración, que incluye condiciones rápidas y lentas para las tareas Flanker y Go/No-Go, está por lo tanto bien adaptado para investigar el compromiso diferencial y la eficiencia de estos modos de control [@ronald_h_bner_9685cd57].
+
+# Análisis Exploratorio
+
+## La Tarea Flanker de Eriksen: Un Paradigma para la Resolución de Conflictos
+
+La Tarea Flanker de Eriksen representa uno de los paradigmas experimentales más consolidados en el estudio del control cognitivo, específicamente en la investigación de los mecanismos de resolución de conflictos. En esta tarea, los participantes enfrentan el desafío de identificar la dirección de una flecha central mientras simultáneamente deben suprimir la información irrelevante proporcionada por flechas flanqueadoras. La elegancia de este paradigma radica en su capacidad para generar conflicto cognitivo de manera controlada y medible, permitiendo así el estudio sistemático de los procesos de control inhibitorio y atencional.
+
+En la implementación actual del experimento, se emplearon cuatro configuraciones de estímulos que varían sistemáticamente en su nivel de conflicto. Los estímulos congruentes, representados por las configuraciones $>>>>>$ y $<<<<<$, presentan flancos que apuntan en la misma dirección que el objetivo central, facilitando así el procesamiento y la respuesta. En contraste, los estímulos incongruentes, manifestados en las configuraciones $>><>>$ y $<<><<$, introducen información conflictiva al presentar flancos que apuntan en dirección opuesta al objetivo, generando así la necesidad de un control cognitivo aumentado para resolver el conflicto y producir la respuesta correcta. Esta manipulación experimental se cruza factorialmente con una manipulación de velocidad de respuesta, resultando en un diseño 2×2 que permite examinar cómo la presión temporal modula los procesos de resolución de conflictos.
+
+La Figura 1 presenta la distribución fundamental de respuestas correctas e incorrectas para cada patrón de flechas en ambas condiciones de velocidad, revelando patrones que son consistentes con décadas de investigación sobre el Efecto de Compatibilidad Flanker (FCE). En la condición rápida (Figura 1A), emerge un patrón claro de deterioro del rendimiento asociado con el conflicto. Los estímulos congruentes muestran tasas de precisión notablemente altas, con el patrón $>>>>>$ alcanzando un 87.3% de respuestas correctas (1,178 de 1,349 ensayos) y el patrón $<<<<<$ mostrando un rendimiento similar con 85.0% de precisión (1,176 de 1,384 ensayos). Esta alta precisión en los ensayos congruentes contrasta marcadamente con el rendimiento en los ensayos incongruentes, donde observamos una caída sustancial en la precisión. El patrón $>><>>$ produce solo un 73.6% de respuestas correctas (944 de 1,282 ensayos), mientras que el patrón $<<><<$ resulta en un 75.2% de precisión (988 de 1,314 ensayos).
+
+El efecto de congruencia en la condición rápida puede cuantificarse mediante la diferencia en las tasas de precisión promedio entre condiciones: $\text{FCE}_{\text{precisión}} = \overline{P}_{\text{congruente}} - \overline{P}_{\text{incongruente}} = 86.15\% - 74.40\% = 11.75\%$. Este efecto del 11.75% representa una medida robusta de la interferencia cognitiva generada por los flancos incongruentes bajo presión temporal. Sin embargo, un hallazgo particularmente intrigante emerge al examinar la condición lenta (Figura 1B). Aunque cabría esperar que el tiempo adicional permitiera a los participantes resolver más efectivamente el conflicto, observamos que el FCE no solo persiste sino que se amplifica. En la condición lenta, los estímulos congruentes alcanzan precisiones del 93.9% y 95.4%, mientras que los incongruentes mantienen tasas de error considerables con precisiones del 75.5% y 72.1%. Esto resulta en un efecto de congruencia de $\text{FCE}_{\text{precisión-lenta}} = 94.65\% - 73.80\% = 20.85\%$, casi el doble del observado en la condición rápida.
+
+
+La Figura 2 extiende este análisis al dominio temporal, proporcionando una visión detallada de cómo el rendimiento evoluciona a lo largo del experimento. Los paneles superiores (Figuras 2A-B) revelan la distribución de respuestas correctas e incorrectas para cada patrón de flechas a través de aproximadamente 600 ensayos por participante. Un aspecto notable de estos datos es la consistencia del patrón de rendimiento a lo largo del tiempo. Los ensayos congruentes mantienen tasas de precisión uniformemente altas durante todo el experimento, formando bandas densas de respuestas correctas con solo ocasionales errores dispersos. En contraste, los ensayos incongruentes muestran un patrón más variable, con errores distribuidos más uniformemente a lo largo del experimento, sugiriendo que el conflicto cognitivo representa una demanda persistente que no se habitúa con la práctica.
+
+Las curvas de aprendizaje suavizadas presentadas en las Figuras 2 E-F proporcionan una cuantificación más precisa de estas tendencias temporales. Estas curvas, revelan patrones divergentes entre las condiciones de velocidad. En la condición rápida, las tasas de error para los estímulos incongruentes se mantienen establemente elevadas, oscilando entre 25-30% a lo largo del experimento, mientras que los estímulos congruentes mantienen tasas de error consistentemente bajas alrededor del 10-15%. La separación entre estas curvas permanece notablemente constante, indicando que el FCE no muestra evidencia de disminución con la práctica. En la condición lenta, observamos una mayor separación entre las curvas de error congruente e incongruente, con los estímulos incongruentes mostrando tasas de error que fluctúan entre 25-35%. Esta mayor variabilidad en la condición lenta podría reflejar fluctuaciones en el estado atencional o en la aplicación de estrategias de control cognitivo cuando la presión temporal es reducida.
+
+El análisis de los tiempos de respuesta, presentado en las Figuras 3 y 4, revela la dinámica temporal del procesamiento del conflicto con un detalle sin precedentes. Las distribuciones de densidad (Figuras 3A-B) exhiben las características típicas de los datos de TR en tareas cognitivas: distribuciones asimétricas positivas con colas largas hacia tiempos de respuesta más lentos
+
+Los diagramas de violín con boxplots integrados (Figuras 3C-D) proporcionan una visualización complementaria que enfatiza tanto la tendencia central como la variabilidad de las distribuciones. Estos gráficos revelan no solo que los ensayos incongruentes producen TRs medianos más lentos, sino también que exhiben mayor variabilidad, como se evidencia en los rangos intercuartílicos más amplios y la presencia de más valores atípicos. La presencia de estos outliers, particularmente TRs superiores a 2000 ms, sugiere que ocasionalmente el sistema de control cognitivo experimenta fallas o demoras sustanciales en la resolución del conflicto, fenómenos que serán de particular interés en el modelado computacional subsecuente.
+
+Las Figuras 4 y 5 dirigen nuestra atención hacia las diferencias individuales. Los mapas de calor de TR medios (Figura 4A-B) revelan una variabilidad sustancial entre participantes que va más allá de simples diferencias en velocidad general. Algunos participantes, como S5 y S6, muestran TRs medios notablemente rápidos de 300-400 ms incluso en ensayos incongruentes, sugiriendo un sistema de control altamente eficiente o posiblemente una estrategia que prioriza la velocidad sobre la precisión. En el extremo opuesto, participantes como S18 y S24 exhiben TRs medios superiores a 600 ms, particularmente en condiciones incongruentes, indicando un procesamiento más cauteloso o posiblemente menos eficiente del conflicto.
+
+Un aspecto relevante de los datos es la consistencia intra-individual: los participantes que responden rápidamente en ensayos congruentes tienden a mantener esa ventaja relativa en ensayos incongruentes, aunque con el costo adicional impuesto por el conflicto. Esta consistencia sugiere diferencias estables en los parámetros fundamentales del procesamiento de información, precisamente el tipo de variabilidad que el DDM está diseñado para descomponer en componentes interpretables.
+
+El análisis de precisión individual presentado en los paneles inferiores de la Figura 4 (C-D) complementa esta imagen al revelar una variabilidad en las tasas de error. Mientras algunos participantes como S18 mantienen tasas de error inferiores al 5% incluso en condiciones desafiantes, otros como S8 cometen errores en más del 30% de los ensayos incongruentes. Crucialmente, a pesar de esta variabilidad en la magnitud absoluta del rendimiento, el efecto de congruencia aparece como un fenómeno universal: todos los participantes sin excepción muestran peor rendimiento en ensayos incongruentes comparado con congruentes, aunque la magnitud de este deterioro varía considerablemente.
+
+
+```{r data-preprocessing}
+# Create a unified subject mapping across all tasks
+all_subjects <- unique(c(
+  ericsen_lento_data[[1]]$Subject,
+  ericsen_rapido_data[[1]]$Subject,
+  gonogo_lento_data[[1]]$Individual,
+  gonogo_rapido_data[[1]]$Individual
+))
+
+# Remove only WW subjects, keep NA as a valid subject
+all_subjects <- all_subjects[all_subjects != "WW"]
+# Ensure NA is treated as a character "NA" not as missing
+all_subjects[is.na(all_subjects)] <- "NA"
+
+# Create global subject mapping
+global_subject_mapping <- data.frame(
+  Subject = all_subjects,
+  Subject_num = seq_along(all_subjects),
+  Subject_label = paste0("S", seq_along(all_subjects))
+)
+
+# Function to create subject-numbered data with global mapping
+create_subject_numbered_data <- function(data, subject_col = "Subject") {
+  data %>%
+    left_join(global_subject_mapping, by = setNames("Subject", subject_col)) %>%
+    mutate(Subject_label = factor(Subject_label, 
+                                  levels = global_subject_mapping$Subject_label))
+}
+
+# Preprocess Flanker data
+ericsen_lento_data[[1]] <- ericsen_lento_data[[1]] %>% 
+  drop_na(Code) %>% 
+  filter(Subject != "WW")
+
+ericsen_rapido_data[[1]] <- ericsen_rapido_data[[1]] %>% 
+  drop_na(Code) %>% 
+  filter(Subject != "WW")
+
+# Function to map codes to arrow patterns
+get_arrow_pattern <- function(code) {
+  case_when(
+    code == 11 ~ ">>>>>",  # Target right, congruent
+    code == 21 ~ "<<<<<",  # Target left, congruent
+    code == 20 ~ ">><>>",  # Target right, incongruent
+    code == 10 ~ "<<><<",  # Target left, incongruent
+    TRUE ~ NA_character_
+  )
+}
+
+# Process fast condition data
+ericsen_rapido_data_t <- ericsen_rapido_data[[1]] %>% 
+  group_by(Subject) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Subject, group_trial) %>%
+  mutate(
+    valid_trial = ifelse(n() == 2, 1, 0),
+    arrow = as.numeric(substr(Code, 1, 1)),
+    correct_answer = as.numeric(arrow[1] == arrow),
+    arrow_pattern = factor(get_arrow_pattern(as.numeric(Code[1])),
+                          levels = c(">>>>>", "<<<<<", ">><>>", "<<><<"))
+  ) %>% 
+  select(
+    Subject,
+    Trial,
+    `Event Type`,
+    Code,
+    Time,
+    group_trial:correct_answer,
+    arrow_pattern
+  ) %>%  
+  ungroup() %>%
+  group_by(Subject, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Process fast condition responses
+resp_ericsen_rapido <- ericsen_rapido_data_t %>% 
+  mutate(
+    action = if_else(arrow == 2, "R", "L"),
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>% 
+  filter(`Event Type` != "Picture") %>%
+  ungroup() %>%
+  group_by(Subject, group_trial) %>%
+  filter(
+    RT_ms >= 150 &
+    RT_ms <= 2000
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Process slow condition data
+ericsen_lento_data_t <- ericsen_lento_data[[1]] %>% 
+  group_by(Subject) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Subject, group_trial) %>%
+  mutate(
+    valid_trial = ifelse(n() == 2, 1, 0),
+    arrow = as.numeric(substr(Code, 1, 1)),
+    correct_answer = as.numeric(arrow[1] == arrow),
+    arrow_pattern = factor(get_arrow_pattern(as.numeric(Code[1])),
+                          levels = c(">>>>>", "<<<<<", ">><>>", "<<><<"))
+  ) %>% 
+  select(
+    Subject,
+    Trial,
+    `Event Type`,
+    Code,
+    Time,
+    group_trial:correct_answer,
+    arrow_pattern
+  ) %>%  
+  ungroup() %>%
+  group_by(Subject, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Process slow condition responses
+resp_ericsen_lento <- ericsen_lento_data_t %>% 
+  mutate(
+    action = if_else(arrow == 2, "R", "L"),
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>% 
+  filter(`Event Type` != "Picture") %>%
+  ungroup() %>%
+  group_by(Subject, group_trial) %>%
+  filter(
+    RT_ms >= 150 &
+    RT_ms <= 4500
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Add subject numbers to Flanker data
+resp_ericsen_rapido_num <- create_subject_numbered_data(resp_ericsen_rapido)
+resp_ericsen_lento_num <- create_subject_numbered_data(resp_ericsen_lento)
+```
+
+```{r flanker-accuracy-heatmaps}
+#| fig.height: 8
+#| fig.width: 10
+#| fig.cap: "Distribution of correct and incorrect responses in the Flanker task. (A) Fast condition and (B) Slow condition show the frequency and percentage of responses for each arrow pattern (congruent: >>>>> and <<<<<; incongruent: >><>> and <<><<)."
+
+create_heatmap <- function(data, condition_name, color_palette) {
+  heatmap_data <- data %>%
+    group_by(arrow_pattern, correct_response) %>%
+    summarise(
+      frequency = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(arrow_pattern) %>%
+    mutate(
+      total = sum(frequency),
+      percentage = round((frequency / total) * 100, 1)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      label = paste0(frequency, "\n(", percentage, "%)")
+    )
+  
+  p <- ggplot(heatmap_data, aes(x = arrow_pattern, y = correct_response, fill = frequency)) +
+    geom_tile(color = "white", size = 1) +
+    geom_text(aes(label = label), size = 4, color = "white", fontface = "bold") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Response"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 1, size = 10, face = "bold"),
+      axis.text.y = element_text(size = 10, face = "bold"),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      panel.grid = element_blank()
+    )
+
+  if (condition_name == "Fast") {
+    p + scale_fill_viridis(option = "A", name = "Frequency", begin = 0, end = 0.8)
+  } else {
+    p + scale_fill_viridis(option = "C", name = "Frequency")
+  }
+}
+
+heatmap_fast <- create_heatmap(resp_ericsen_rapido_num, "Fast", "A")
+heatmap_slow <- create_heatmap(resp_ericsen_lento_num, "Slow", "C")
+
+ggarrange(heatmap_fast, heatmap_slow, 
+          ncol = 1, nrow = 2,
+          labels = c("A", "B"),
+          common.legend = FALSE)
+```
+
+```{r flanker-trial-progression}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Trial-by-trial analysis of the Flanker task. (A-B) Response distribution across trials for each arrow pattern in fast and slow conditions. (C-D) Distribution of arrow patterns across experimental trials. (E-F) Smoothed error rates showing learning curves for each arrow pattern."
+
+create_stacked_bar <- function(data, condition_name) {
+  bar_data <- data %>%
+    group_by(Trial, arrow_pattern, correct_response) %>%
+    summarise(
+      count = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(Trial, arrow_pattern) %>%
+    mutate(
+      total = sum(count),
+      percentage = (count / total) * 100
+    ) %>%
+    ungroup()
+  
+  ggplot(bar_data, aes(x = Trial, y = percentage, fill = correct_response)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.8) +
+    facet_wrap(~ arrow_pattern, ncol = 2, scales = "free_x") +
+    scale_fill_manual(values = c("Incorrect" = "#E74C3C", "Correct" = "#27AE60"),
+                      name = "Response") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Percentage (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "top",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 25), limits = c(0, 100))
+}
+
+create_pattern_distribution <- function(data, condition_name) {
+  full_data <- if(condition_name == "Fast") {
+    ericsen_rapido_data_t
+  } else {
+    ericsen_lento_data_t
+  }
+  
+  pattern_data <- full_data %>%
+    filter(`Event Type` == "Picture") %>%
+    select(Trial, arrow_pattern) %>%
+    distinct()
+  
+  ggplot(pattern_data, aes(x = Trial, color = arrow_pattern, fill = arrow_pattern)) +
+    geom_density(alpha = 0.3, size = 1, adjust = 1.5) +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    scale_fill_manual(values = c(">>>>>" = "#2E86AB", 
+                                 "<<<<<" = "#A23B72", 
+                                 ">><>>" = "#F18F01", 
+                                 "<<><<" = "#C73E1D"),
+                      name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+create_incorrect_density_plot <- function(data, condition_name) {
+  density_data <- data %>%
+    group_by(Trial, arrow_pattern) %>%
+    summarise(
+      total = n(),
+      incorrect_count = sum(correct_response == "Incorrect"),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      incorrect_percentage = (incorrect_count / total) * 100
+    ) %>%
+    complete(Trial, arrow_pattern, fill = list(incorrect_percentage = NA)) %>%
+    filter(!is.na(incorrect_percentage))
+  
+  ggplot(density_data, aes(x = Trial, y = incorrect_percentage, color = arrow_pattern)) +
+    geom_smooth(method = "loess", span = 0.3, se = TRUE, alpha = 0.2, size = 1) +
+    geom_point(alpha = 0.3, size = 1) +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Error Rate (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 20), limits = c(0, 100))
+}
+
+# Create plots
+stacked_fast <- create_stacked_bar(resp_ericsen_rapido_num, "Fast")
+stacked_slow <- create_stacked_bar(resp_ericsen_lento_num, "Slow")
+pattern_fast <- create_pattern_distribution(resp_ericsen_rapido_num, "Fast")
+pattern_slow <- create_pattern_distribution(resp_ericsen_lento_num, "Slow")
+incorrect_fast <- create_incorrect_density_plot(resp_ericsen_rapido_num, "Fast")
+incorrect_slow <- create_incorrect_density_plot(resp_ericsen_lento_num, "Slow")
+
+# Arrange plots
+ggarrange(stacked_fast, stacked_slow,
+          pattern_fast, pattern_slow,
+          incorrect_fast, incorrect_slow,
+          ncol = 2, nrow = 3,
+          labels = c("A", "B", "C", "D", "E", "F"),
+          common.legend = FALSE)
+```
+
+```{r flanker-rt-distributions}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Response time distributions in the Flanker task. (A-B) Density plots showing RT distributions for each arrow pattern, separated by response accuracy. (C-D) Violin plots with embedded boxplots showing RT distributions and outliers for each condition."
+
+# Calculate RT limits
+min_rt_fast <- min(resp_ericsen_rapido_num$RT_ms, na.rm = TRUE)
+min_rt_slow <- min(resp_ericsen_lento_num$RT_ms, na.rm = TRUE)
+min_rt_overall <- min(min_rt_fast, min_rt_slow)
+max_rt_fast <- max(resp_ericsen_rapido_num$RT_ms, na.rm = TRUE)
+max_rt_slow <- max(resp_ericsen_lento_num$RT_ms, na.rm = TRUE)
+max_rt_overall <- max(max_rt_fast, max_rt_slow)
+
+create_rt_density_plot <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data
+  
+  ggplot(rt_data, aes(x = RT_ms, fill = arrow_pattern, color = arrow_pattern)) +
+    geom_density(alpha = 0.3, size = 1) +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_manual(values = c(">>>>>" = "#2E86AB", 
+                                 "<<<<<" = "#A23B72", 
+                                 ">><>>" = "#F18F01", 
+                                 "<<><<" = "#C73E1D"),
+                      name = "Arrow Pattern") +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
+}
+
+create_rt_violin_plot <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data
+  
+  ggplot(rt_data, aes(x = arrow_pattern, y = RT_ms, fill = arrow_pattern)) +
+    geom_violin(alpha = 0.7, scale = "width") +
+    geom_boxplot(width = 0.1, alpha = 0.8, outlier.size = 1) +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_manual(values = c(">>>>>" = "#2E86AB", 
+                                 "<<<<<" = "#A23B72", 
+                                 ">><>>" = "#F18F01", 
+                                 "<<><<" = "#C73E1D"),
+                      name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Response Time (ms)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 10, face = "bold"),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "none",
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create plots
+rt_density_fast <- create_rt_density_plot(resp_ericsen_rapido_num, "Fast", min_rt_overall, max_rt_overall)
+rt_density_slow <- create_rt_density_plot(resp_ericsen_lento_num, "Slow", min_rt_overall, max_rt_overall)
+rt_violin_fast <- create_rt_violin_plot(resp_ericsen_rapido_num, "Fast", min_rt_overall, max_rt_overall)
+rt_violin_slow <- create_rt_violin_plot(resp_ericsen_lento_num, "Slow", min_rt_overall, max_rt_overall)
+
+# Arrange plots
+ggarrange(rt_density_fast, rt_density_slow,
+          rt_violin_fast, rt_violin_slow,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE)
+```
+
+```{r flanker-individual-analysis}
+#| fig.height: 16
+#| fig.width: 14
+#| fig.cap: "Individual participant analysis for the Flanker task. (A-B) Mean response times and (C-D) trial counts for each participant across arrow patterns and response types. Heatmaps show individual differences in performance patterns."
+
+# Calculate summary statistics by subject
+summary_by_subject <- bind_rows(
+  resp_ericsen_rapido_num %>% mutate(condition = "Fast"),
+  resp_ericsen_lento_num %>% mutate(condition = "Slow")
+) %>%
+  group_by(Subject_label, condition, arrow_pattern, correct_response) %>%
+  summarise(
+    n_trials = n(),
+    mean_RT = mean(RT_ms, na.rm = TRUE),
+    median_RT = median(RT_ms, na.rm = TRUE),
+    sd_RT = sd(RT_ms, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(Subject_label, condition, correct_response, arrow_pattern)
+
+# Calculate RT scale limits
+all_mean_rt <- summary_by_subject$mean_RT[!is.na(summary_by_subject$mean_RT)]
+rt_min <- min(all_mean_rt)
+rt_max <- max(all_mean_rt)
+
+# Calculate count scale limits
+all_counts <- summary_by_subject$n_trials
+count_min <- min(all_counts)
+count_max <- max(all_counts)
+
+# Create RT heatmaps
+create_rt_heatmap <- function(data, condition_name, rt_min, rt_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, arrow_pattern, mean_RT) %>%
+    mutate(mean_RT_rounded = round(mean_RT, 0))
+
+  ggplot(heatmap_data, aes(x = arrow_pattern, y = Subject_label, fill = mean_RT)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = ifelse(is.na(mean_RT_rounded), "", mean_RT_rounded)), size = 3, color = "white") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "C", name = "Mean RT (ms)", limits = c(rt_min, rt_max)) +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create count heatmaps
+create_count_heatmap <- function(data, condition_name, count_min, count_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, arrow_pattern, n_trials) %>%
+    # Calculate total trials per subject and arrow pattern
+    group_by(Subject_label, arrow_pattern) %>%
+    mutate(
+      total_per_pattern = sum(n_trials),
+      percentage = round((n_trials / total_per_pattern) * 100, 1)
+    ) %>%
+    ungroup()
+
+  ggplot(heatmap_data, aes(x = arrow_pattern, y = Subject_label, fill = n_trials)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = paste0(n_trials, "(", percentage, "%)")), 
+              size = 2.5, color = "white", fontface = "bold") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "D", name = "Number of Trials", limits = c(count_min, count_max)) +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Arrow Pattern",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create all heatmaps
+heatmap_fast_rt <- create_rt_heatmap(summary_by_subject, "Fast", rt_min, rt_max)
+heatmap_slow_rt <- create_rt_heatmap(summary_by_subject, "Slow", rt_min, rt_max)
+heatmap_fast_count <- create_count_heatmap(summary_by_subject, "Fast", count_min, count_max)
+heatmap_slow_count <- create_count_heatmap(summary_by_subject, "Slow", count_min, count_max)
+
+# Arrange plots
+ggarrange(heatmap_fast_rt, heatmap_slow_rt,
+          heatmap_fast_count, heatmap_slow_count,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE)
+```
+
+```{r flanker-individual-rt-density}
+#| fig.height: 20
+#| fig.width: 14
+#| fig.cap: "Individual participant RT density distributions for the Flanker task. Panels show RT distributions for each participant separated by arrow pattern and response accuracy in (A-B) Fast and (C-D) Slow conditions."
+
+# Function to create RT density plot by subject for Flanker
+create_flanker_rt_density_by_subject <- function(data, condition_name, response_type, min_rt, max_rt) {
+  # Filter by response type
+  plot_data <- data %>%
+    filter(correct_response == response_type)
+  
+  # Create density plot
+  ggplot(plot_data, aes(x = RT_ms, color = arrow_pattern)) +
+    geom_density(alpha = 0.3, size = 0.8) +
+    facet_wrap(~ Subject_label, ncol = 6, scales = "free_y") +
+    scale_color_manual(values = c(">>>>>" = "#2E86AB", 
+                                  "<<<<<" = "#A23B72", 
+                                  ">><>>" = "#F18F01", 
+                                  "<<><<" = "#C73E1D"),
+                       name = "Arrow Pattern") +
+    labs(
+      title = paste(condition_name, "Condition -", response_type, "Responses"),
+      subtitle = "RT Distribution by Participant and Arrow Pattern",
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 7),
+      axis.title = element_text(size = 10, face = "bold"),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 8, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/500)*500, ceiling(max_rt/500)*500, 1000), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Calculate min and max RT across both conditions
+all_rt <- c(resp_ericsen_rapido_num$RT_ms[resp_ericsen_rapido_num$RT_ms >= 150], 
+            resp_ericsen_lento_num$RT_ms[resp_ericsen_lento_num$RT_ms >= 150])
+min_rt_overall <- min(all_rt, na.rm = TRUE)
+max_rt_overall <- max(all_rt, na.rm = TRUE)
+
+# Create plots for Fast condition
+fast_correct <- create_flanker_rt_density_by_subject(resp_ericsen_rapido_num, "Fast", "Correct", 
+                                                     min_rt_overall, max_rt_overall)
+fast_incorrect <- create_flanker_rt_density_by_subject(resp_ericsen_rapido_num, "Fast", "Incorrect", 
+                                                       min_rt_overall, max_rt_overall)
+
+# Create plots for Slow condition
+slow_correct <- create_flanker_rt_density_by_subject(resp_ericsen_lento_num, "Slow", "Correct", 
+                                                     min_rt_overall, max_rt_overall)
+slow_incorrect <- create_flanker_rt_density_by_subject(resp_ericsen_lento_num, "Slow", "Incorrect", 
+                                                       min_rt_overall, max_rt_overall)
+
+# Display plots
+ggarrange(fast_correct, fast_incorrect,
+          slow_correct, slow_incorrect,
+          ncol = 1, nrow = 4,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE,
+          heights = c(1, 1, 1, 1))
+```
+
+## La Tarea Go/No-Go: Un Paradigma para la Inhibición de la Respuesta
+
+La tarea Go/No-Go representa un paradigma experimental clásico para el estudio de la inhibición de respuesta, un componente fundamental del control ejecutivo \cite{Donders1969}. En contraste con la tarea Flanker que evalúa la resolución de conflictos entre respuestas competidoras, la tarea Go/No-Go examina la capacidad de suprimir completamente una respuesta motora cuando las demandas contextuales así lo requieren \cite{Verbruggen2019}. La estructura de esta tarea genera una tendencia de respuesta dominante mediante la presentación frecuente de estímulos "Go" que requieren una respuesta rápida, intercalados con estímulos "No-Go" infrecuentes que demandan la inhibición de esta respuesta automatizada.
+
+En la implementación actual del experimento, se empleó una proporción típica de 80% ensayos Go y 20% ensayos No-Go, diseñada para establecer una fuerte impulsividad de respuesta que hace que la inhibición en los ensayos No-Go sea cognitivamente demandante \cite{Wessel2018}. Esta proporción asimétrica es crítica para el paradigma, ya que una distribución más equilibrada reduciría la velocidada de la respuesta y, consecuentemente, la demanda de control inhibitorio. Al igual que en la tarea Flanker, se implementó una manipulación factorial de la velocidad de respuesta, con condiciones rápida y lenta, permitiendo examinar cómo la presión temporal afecta los procesos inhibitorios.
+
+La Figura 6 presenta la distribución fundamental de respuestas correctas e incorrectas para los estímulos Go y No-Go en ambas condiciones de velocidad. En la condición rápida (Figura 6A), los datos revelan un patrón de rendimiento característico del paradigma. Los ensayos Go muestran una precisión extremadamente alta del 97.5% (5,623 respuestas correctas de 5,768 ensayos), confirmando el establecimiento exitoso de la respuesta. Esta alta tasa de aciertos en los ensayos Go contrasta marcadamente con el rendimiento en los ensayos No-Go, donde se observa una tasa de falsas alarmas del 17.9% (252 errores de 1,406 ensayos), equivalente a una precisión del 82.1% en la inhibición de respuesta.
+
+La condición lenta (Figura 6B) presenta un patrón inesperado que merece análisis detallado. Mientras que la precisión en los ensayos Go disminuye ligeramente al 93.5% (5,216 correctas de 5,578 ensayos), la tasa de falsas alarmas en los ensayos No-Go aumenta considerablemente al 29.9% (409 errores de 1,369 ensayos). Este incremento en las falsas alarmas bajo condiciones de menor presión temporal parece contraintuitivo, ya que cabría esperar que el tiempo adicional facilitara la inhibición exitosa. Sin embargo, este fenómeno ha sido documentado en la literatura y puede atribuirse a varios factores interrelacionados \cite{Littman2017}.
+
+El análisis temporal presentado en la Figura 7 proporciona información valiosa sobre la dinámica del control inhibitorio a lo largo del experimento. Los paneles superiores (Figuras 7A-B) muestran la distribución de respuestas para cada tipo de estímulo a través de los aproximadamente 300 ensayos por condición. Un aspecto notable es la distribución temporal de los errores. En los ensayos Go, los escasos errores (omisiones) aparecen distribuidos de manera relativamente uniforme a lo largo del experimento, sugiriendo lapsos atencionales ocasionales más que un patrón sistemático de fatiga o aprendizaje. Por el contrario, las falsas alarmas en los ensayos No-Go muestran una distribución más variable, con períodos de inhibición exitosa alternando con rachas de errores, particularmente en la condición lenta.
+
+Las curvas de error suavizadas (Figuras 7E-F) revelan tendencias temporales diferenciadas entre las condiciones. En la condición rápida, la tasa de error para los ensayos Go se mantiene establemente baja alrededor del 2-3% durante todo el experimento. La tasa de falsas alarmas para los ensayos No-Go muestra mayor variabilidad, oscilando entre 15-25%, pero sin una tendencia clara de mejora o deterioro con la práctica. Este patrón sugiere que el control inhibitorio bajo presión temporal representa una demanda cognitiva constante que no se beneficia significativamente de la experiencia dentro de la sesión experimental.
+
+La condición lenta presenta un perfil temporal más complejo. Las tasas de error en los ensayos Go muestran mayor variabilidad, fluctuando entre 5-10%, posiblemente reflejando fluctuaciones en la atención sostenida cuando la tarea permite un ritmo más pausado. Las tasas de falsas alarmas en los ensayos No-Go son notablemente más altas y variables, oscilando entre 25-35% con picos ocasionales que alcanzan el 40%. Esta mayor variabilidad temporal en la condición lenta sugiere que la reducción en la presión temporal puede paradójicamente desestabilizar el control inhibitorio, posiblemente al permitir mayor variabilidad en las estrategias de preparación y en los estados atencionales.
+
+El análisis de los tiempos de respuesta, presentado en la Figura 8, revela aspectos importantes sobre la dinámica temporal de los procesos de decisión y ejecución. Las distribuciones de densidad (Figuras 8A-B) muestran perfiles claramente diferenciados entre los aciertos Go y las falsas alarmas No-Go. Los aciertos Go exhiben distribuciones relativamente simétricas y compactas, con tendencias centrales alrededor de 400-450 ms en la condición rápida y 450-500 ms en la condición lenta
+
+Las falsas alarmas No-Go presentan un perfil temporal distintivo. En ambas condiciones de velocidad, los TRs de las falsas alarmas son comparables o incluso ligeramente más rápidos que los aciertos Go, con distribuciones que muestran menor variabilidad. Este patrón es consistente con la interpretación de que las falsas alarmas resultan de fallas en el proceso de inhibición, donde la respuesta se ejecuta sin el control top-down necesario para detenerla. La similitud en los TRs entre aciertos Go y falsas alarmas No-Go sugiere que ambos reflejan la ejecución de la misma respuesta motora, diferenciándose únicamente en si el proceso inhibitorio fue iniciado exitosamente o no.
+
+Los diagramas de violín (Figuras 8C-D) enfatizan estas diferencias distribucionales y revelan la presencia de valores atípicos particularmente en la condición lenta. Estos outliers, con TRs superiores a 1000 ms, son más frecuentes en los aciertos Go de la condición lenta, sugiriendo lapsos atencionales ocasionales cuando la presión temporal es reducida. La ausencia relativa de tales outliers en las falsas alarmas No-Go refuerza la interpretación de que estos errores resultan de procesos balísticos relativamente automáticos más que de decisiones deliberadas pero incorrectas.
+
+La Figura 10 presenta un análisis exhaustivo de las diferencias individuales en el rendimiento de la tarea Go/No-Go. El panel A muestra el rendimiento en términos de teoría de detección de señales, graficando la tasa de aciertos (proporción de respuestas correctas en ensayos Go) contra la tasa de falsas alarmas (proporción de respuestas incorrectas en ensayos No-Go) para cada participante. La mayoría de los participantes se agrupan en la esquina superior izquierda del espacio, indicando altas tasas de aciertos combinadas con tasas de falsas alarmas relativamente bajas. Sin embargo, existe variabilidad considerable, con algunos participantes mostrando tasas de falsas alarmas superiores al 40% mientras mantienen tasas de aciertos cercanas al 100%.
+
+Los mapas de calor de TR medios (Figura 10B-C) revelan patrones individuales consistentes en la velocidad de respuesta. Los participantes que responden rápidamente en los ensayos Go tienden a mostrar también falsas alarmas rápidas, sugiriendo diferencias estables en el umbral motor o en la preparación de respuesta. Algunos participantes como S5 y S11 muestran TRs medios notablemente rápidos (300-350 ms) en ambos tipos de respuesta, mientras que otros como S18 y S22 exhiben TRs más conservadores (500-600 ms). Esta consistencia intra-individual en la velocidad de respuesta, independientemente del tipo de ensayo, sugiere que las diferencias individuales en la tarea Go/No-Go pueden estar más relacionadas con parámetros motores generales que con la eficiencia específica del control inhibitorio.
+
+El análisis de precisión por participante (Figura 10D-E) revela heterogeneidad sustancial en la capacidad inhibitoria. Mientras algunos participantes como S4 y S17 mantienen tasas de falsas alarmas inferiores al 10% en ambas condiciones, otros como S8 y S15 muestran tasas de falsas alarmas que se aproximan o superan el 50%, indicando dificultades significativas con el control inhibitorio. Un hallazgo particularmente interesante es que la variabilidad entre participantes es mayor para los ensayos No-Go que para los ensayos Go, sugiriendo que las diferencias individuales en el control cognitivo se manifiestan más claramente en situaciones que requieren inhibición activa que en aquellas que requieren ejecución de respuesta.
+
+La comparación entre condiciones de velocidad a nivel individual revela patrones no uniformes. Mientras algunos participantes muestran el patrón grupal de peor inhibición en la condición lenta, otros muestran el patrón opuesto o ninguna diferencia entre condiciones. Esta heterogeneidad en los efectos de la manipulación de velocidad sugiere que los participantes pueden adoptar diferentes estrategias o tener diferentes vulnerabilidades a los factores que contribuyen al incremento paradójico de falsas alarmas en la condición lenta.
+
+
+```{r gonogo-data-preprocessing}
+# Process Go/No-Go data - Fast condition
+gonogo_rapido_data[[1]] <- gonogo_rapido_data[[1]] %>% 
+  drop_na(Code) %>% 
+  filter(Individual != "WW")
+
+# Process Go/No-Go data - Slow condition
+gonogo_lento_data[[1]] <- gonogo_lento_data[[1]] %>% 
+  drop_na(Code) %>% 
+  filter(Individual != "WW")
+
+# Function to get stimulus type label
+get_stimulus_type <- function(code) {
+  case_when(
+    code == 22 ~ "Go",
+    code == 33 ~ "No-Go",
+    TRUE ~ NA_character_
+  )
+}
+
+# Process Fast condition data
+gonogo_rapido_data_t <- gonogo_rapido_data[[1]] %>% 
+  group_by(Individual) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Individual, group_trial) %>%
+  mutate(
+    stimulus_code = as.numeric(Code[`Event Type` == "Picture"][1]),
+    stimulus_type = factor(get_stimulus_type(stimulus_code), levels = c("Go", "No-Go")),
+    response_present = any(`Event Type` == "Response"),
+    correct_answer = case_when(
+      stimulus_type == "Go" & response_present ~ 1,
+      stimulus_type == "No-Go" & !response_present ~ 1,
+      TRUE ~ 0
+    )
+  ) %>% 
+  ungroup() %>%
+  group_by(Individual, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Process responses for Fast condition
+resp_gonogo_rapido <- gonogo_rapido_data_t %>% 
+  filter(`Event Type` == "Response") %>%
+  mutate(
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>%
+  ungroup() %>%
+  group_by(Individual, group_trial) %>%
+  filter(
+    RT_ms >= 150 &
+    RT_ms <= 2000
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Add No-Go trials without responses (correct rejections)
+nogo_correct_rapido <- gonogo_rapido_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "No-Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(1, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Add Go trials without responses (misses)
+go_incorrect_rapido <- gonogo_rapido_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(0, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Combine all trials for Fast condition
+resp_gonogo_rapido_all <- bind_rows(resp_gonogo_rapido, nogo_correct_rapido, go_incorrect_rapido) %>%
+  arrange(Individual, group_trial)
+
+# Process Slow condition data
+gonogo_lento_data_t <- gonogo_lento_data[[1]] %>% 
+  group_by(Individual) %>% 
+  mutate(
+    group_trial = cumsum(if_else(`Event Type` == "Picture", 1, 0))
+  ) %>%
+  ungroup() %>% 
+  group_by(Individual, group_trial) %>%
+  mutate(
+    stimulus_code = as.numeric(Code[`Event Type` == "Picture"][1]),
+    stimulus_type = factor(get_stimulus_type(stimulus_code), levels = c("Go", "No-Go")),
+    response_present = any(`Event Type` == "Response"),
+    correct_answer = case_when(
+      stimulus_type == "Go" & response_present ~ 1,
+      stimulus_type == "No-Go" & !response_present ~ 1,
+      TRUE ~ 0
+    )
+  ) %>% 
+  ungroup() %>%
+  group_by(Individual, group_trial) %>% 
+  mutate(
+    Time = as.numeric(Time),
+    RT_ms = (Time - Time[1]) / 10
+  )
+
+# Process responses for Slow condition
+resp_gonogo_lento <- gonogo_lento_data_t %>% 
+  filter(`Event Type` == "Response") %>%
+  mutate(
+    correct_response = factor(correct_answer, 
+                             levels = c(0, 1), 
+                             labels = c("Incorrect", "Correct"))
+  ) %>%
+  ungroup() %>%
+  group_by(Individual, group_trial) %>%
+  filter(
+    RT_ms >= 150 &
+    RT_ms <= 4500
+  ) %>% 
+  slice_min(order_by = Time, n = 1)
+
+# Add No-Go trials without responses (correct rejections)
+nogo_correct_lento <- gonogo_lento_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "No-Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(1, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Add Go trials without responses (misses)
+go_incorrect_lento <- gonogo_lento_data_t %>%
+  filter(`Event Type` == "Picture", stimulus_type == "Go", !response_present) %>%
+  distinct(Individual, group_trial, .keep_all = TRUE) %>%
+  mutate(
+    correct_response = factor(0, levels = c(0, 1), labels = c("Incorrect", "Correct")),
+    RT_ms = NA_real_
+  )
+
+# Combine all trials for Slow condition
+resp_gonogo_lento_all <- bind_rows(resp_gonogo_lento, nogo_correct_lento, go_incorrect_lento) %>%
+  arrange(Individual, group_trial)
+
+# Add subject numbers using global mapping
+resp_gonogo_rapido_num <- create_subject_numbered_data(resp_gonogo_rapido_all, "Individual")
+resp_gonogo_lento_num <- create_subject_numbered_data(resp_gonogo_lento_all, "Individual")
+```
+
+```{r gonogo-accuracy-analysis}
+#| fig.height: 8
+#| fig.width: 10
+#| fig.cap: "Distribution of correct and incorrect responses in the Go/No-Go task. (A) Fast condition and (B) Slow condition show the frequency and percentage of responses for Go and No-Go trials."
+
+# Create heatmap function for Go/No-Go
+create_gonogo_heatmap <- function(data, condition_name, color_palette) {
+  heatmap_data <- data %>%
+    group_by(stimulus_type, correct_response) %>%
+    summarise(
+      frequency = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(stimulus_type) %>%
+    mutate(
+      total = sum(frequency),
+      percentage = round((frequency / total) * 100, 1)
+    ) %>%
+    ungroup() %>%
+    mutate(
+      label = paste0(frequency, "(", percentage, "%)")
+    )
+  
+  p <- ggplot(heatmap_data, aes(x = stimulus_type, y = correct_response, fill = frequency)) +
+    geom_tile(color = "white", size = 1) +
+    geom_text(aes(label = label), size = 4, color = "white", fontface = "bold") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Stimulus Type",
+      y = "Response"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 12, face = "bold"),
+      axis.text.y = element_text(size = 10, face = "bold"),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      panel.grid = element_blank()
+    )
+
+  if (condition_name == "Fast") {
+    p + scale_fill_viridis(option = "A", name = "Frequency", begin = 0, end = 0.8)
+  } else {
+    p + scale_fill_viridis(option = "C", name = "Frequency")
+  }
+}
+
+# Create heatmaps
+heatmap_fast_gonogo <- create_gonogo_heatmap(resp_gonogo_rapido_num, "Fast", "A")
+heatmap_slow_gonogo <- create_gonogo_heatmap(resp_gonogo_lento_num, "Slow", "C")
+
+ggarrange(heatmap_fast_gonogo, heatmap_slow_gonogo, 
+          ncol = 1, nrow = 2,
+          labels = c("A", "B"),
+          common.legend = FALSE)
+```
+
+```{r gonogo-trial-progression}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Trial-by-trial analysis of the Go/No-Go task. (A-B) Response distribution across trials for Go and No-Go stimuli. (C-D) Distribution of stimulus types across trials. (E-F) Error rates showing performance changes over time."
+
+# Create stacked bar chart for Go/No-Go
+create_gonogo_stacked_bar <- function(data, condition_name) {
+  full_data <- if(condition_name == "Fast") {
+    gonogo_rapido_data_t
+  } else {
+    gonogo_lento_data_t
+  }
+  
+  trial_data <- full_data %>%
+    filter(`Event Type` == "Picture") %>%
+    select(Individual, group_trial, stimulus_type) %>%
+    distinct()
+  
+  bar_data <- data %>%
+    select(Individual, group_trial, correct_response, stimulus_type) %>%
+    left_join(trial_data %>% select(Individual, group_trial), 
+              by = c("Individual" = "Individual", "group_trial" = "group_trial")) %>%
+    group_by(group_trial, stimulus_type, correct_response) %>%
+    summarise(
+      count = n(),
+      .groups = 'drop'
+    ) %>%
+    group_by(group_trial, stimulus_type) %>%
+    mutate(
+      total = sum(count),
+      percentage = (count / total) * 100
+    ) %>%
+    ungroup()
+  
+  ggplot(bar_data, aes(x = group_trial, y = percentage, fill = correct_response)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.8) +
+    facet_wrap(~ stimulus_type, ncol = 2, scales = "free_x") +
+    scale_fill_manual(values = c("Incorrect" = "#E74C3C", "Correct" = "#27AE60"),
+                      name = "Response") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Percentage (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "top",
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 25), limits = c(0, 100))
+}
+
+# Create stimulus distribution plot
+create_stimulus_distribution <- function(data, condition_name) {
+  full_data <- if(condition_name == "Fast") {
+    gonogo_rapido_data_t
+  } else {
+    gonogo_lento_data_t
+  }
+  
+  stimulus_data <- full_data %>%
+    filter(`Event Type` == "Picture") %>%
+    select(Trial, stimulus_type) %>%
+    distinct()
+  
+  ggplot(stimulus_data, aes(x = Trial, color = stimulus_type, fill = stimulus_type)) +
+    geom_density(alpha = 0.3, size = 1, adjust = 1.5) +
+    scale_color_manual(values = c("Go" = "#2E86AB", "No-Go" = "#E74C3C"),
+                       name = "Stimulus Type") +
+    scale_fill_manual(values = c("Go" = "#2E86AB", "No-Go" = "#E74C3C"),
+                      name = "Stimulus Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# Create error rate plot
+create_error_rate_plot <- function(data, condition_name) {
+  error_data <- data %>%
+    group_by(Trial, stimulus_type) %>%
+    summarise(
+      total = n(),
+      error_count = sum(correct_response == "Incorrect"),
+      .groups = 'drop'
+    ) %>%
+    mutate(
+      error_percentage = (error_count / total) * 100
+    ) %>%
+    complete(Trial, stimulus_type, fill = list(error_percentage = NA)) %>%
+    filter(!is.na(error_percentage))
+  
+  ggplot(error_data, aes(x = Trial, y = error_percentage, color = stimulus_type)) +
+    geom_smooth(method = "loess", span = 0.3, se = TRUE, alpha = 0.2, size = 1) +
+    geom_point(alpha = 0.3, size = 1) +
+    scale_color_manual(values = c("Go" = "#2E86AB", "No-Go" = "#E74C3C"),
+                       name = "Stimulus Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Trial Number",
+      y = "Error Rate (%)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "right",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(0, 100, 20), limits = c(0, 100))
+}
+
+# Create plots
+stacked_fast_gonogo <- create_gonogo_stacked_bar(resp_gonogo_rapido_num, "Fast")
+stacked_slow_gonogo <- create_gonogo_stacked_bar(resp_gonogo_lento_num, "Slow")
+stimulus_fast <- create_stimulus_distribution(resp_gonogo_rapido_num, "Fast")
+stimulus_slow <- create_stimulus_distribution(resp_gonogo_lento_num, "Slow")
+error_fast <- create_error_rate_plot(resp_gonogo_rapido_num, "Fast")
+error_slow <- create_error_rate_plot(resp_gonogo_lento_num, "Slow")
+
+# Arrange plots
+ggarrange(stacked_fast_gonogo, stacked_slow_gonogo,
+          stimulus_fast, stimulus_slow,
+          error_fast, error_slow,
+          ncol = 2, nrow = 3,
+          labels = c("A", "B", "C", "D", "E", "F"),
+          common.legend = FALSE)
+```
+
+```{r gonogo-rt-distributions}
+#| fig.height: 10
+#| fig.width: 12
+#| fig.cap: "Response time distributions in the Go/No-Go task. (A-B) Density plots showing RT distributions for Go hits and No-Go false alarms. (C-D) Violin plots with embedded boxplots showing RT distributions for each response type."
+
+# Filter only trials with responses for RT analysis
+resp_gonogo_rapido_rt <- resp_gonogo_rapido_num %>% filter(!is.na(RT_ms))
+resp_gonogo_lento_rt <- resp_gonogo_lento_num %>% filter(!is.na(RT_ms))
+
+# Calculate RT limits
+if(nrow(resp_gonogo_rapido_rt) > 0 & nrow(resp_gonogo_lento_rt) > 0) {
+  min_rt_gonogo <- min(c(resp_gonogo_rapido_rt$RT_ms, resp_gonogo_lento_rt$RT_ms), na.rm = TRUE)
+  max_rt_gonogo <- max(c(resp_gonogo_rapido_rt$RT_ms, resp_gonogo_lento_rt$RT_ms), na.rm = TRUE)
+} else {
+  min_rt_gonogo <- 150
+  max_rt_gonogo <- 2000
+}
+
+# RT density plot for Go/No-Go
+create_gonogo_rt_density <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data %>% 
+    filter(!is.na(RT_ms)) %>%
+    filter(!(stimulus_type == "Go" & correct_response == "Incorrect")) %>%
+    filter(!(stimulus_type == "No-Go" & correct_response == "Correct"))
+  
+  if(nrow(rt_data) == 0) {
+    return(
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No RT data available", size = 6) +
+        theme_void() +
+        labs(title = paste(condition_name, "Condition - No RT Data"))
+    )
+  }
+  
+  rt_data <- rt_data %>%
+    mutate(
+      response_type = case_when(
+        stimulus_type == "Go" & correct_response == "Correct" ~ "Go Hit",
+        stimulus_type == "No-Go" & correct_response == "Incorrect" ~ "No-Go False Alarm",
+        TRUE ~ "Other"
+      )
+    )
+  
+  ggplot(rt_data, aes(x = RT_ms, fill = response_type, color = response_type)) +
+    geom_density(alpha = 0.3, size = 1) +
+    scale_fill_manual(values = c("Go Hit" = "#2E86AB", 
+                                 "No-Go False Alarm" = "#E74C3C"),
+                      name = "Response Type") +
+    scale_color_manual(values = c("Go Hit" = "#2E86AB", 
+                                  "No-Go False Alarm" = "#E74C3C"),
+                       name = "Response Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create RT violin plot
+create_gonogo_rt_violin <- function(data, condition_name, min_rt, max_rt) {
+  rt_data <- data %>% 
+    filter(!is.na(RT_ms)) %>%
+    filter(!(stimulus_type == "Go" & correct_response == "Incorrect")) %>%
+    filter(!(stimulus_type == "No-Go" & correct_response == "Correct"))
+  
+  if(nrow(rt_data) == 0) {
+    return(
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No RT data available", size = 6) +
+        theme_void() +
+        labs(title = paste(condition_name, "Condition - No RT Data"))
+    )
+  }
+  
+  rt_data <- rt_data %>%
+    mutate(
+      response_type = case_when(
+        stimulus_type == "Go" & correct_response == "Correct" ~ "Go Hit",
+        stimulus_type == "No-Go" & correct_response == "Incorrect" ~ "No-Go False Alarm",
+        TRUE ~ "Other"
+      )
+    )
+  
+  ggplot(rt_data, aes(x = response_type, y = RT_ms, fill = response_type)) +
+    geom_violin(alpha = 0.7, scale = "width") +
+    geom_boxplot(width = 0.1, alpha = 0.8, outlier.size = 1) +
+    scale_fill_manual(values = c("Go Hit" = "#2E86AB", 
+                                 "No-Go False Alarm" = "#E74C3C"),
+                      name = "Response Type") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Response Type",
+      y = "Response Time (ms)"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, face = "bold"),
+      axis.text.y = element_text(size = 10),
+      axis.title = element_text(size = 12, face = "bold"),
+      plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+      legend.position = "none",
+      panel.grid.minor = element_blank()
+    ) +
+    scale_y_continuous(breaks = seq(floor(min_rt/100)*100, ceiling(max_rt/500)*500, 500), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create plots
+rt_density_fast_gonogo <- create_gonogo_rt_density(resp_gonogo_rapido_rt, "Fast", min_rt_gonogo, max_rt_gonogo)
+rt_density_slow_gonogo <- create_gonogo_rt_density(resp_gonogo_lento_rt, "Slow", min_rt_gonogo, max_rt_gonogo)
+rt_violin_fast_gonogo <- create_gonogo_rt_violin(resp_gonogo_rapido_rt, "Fast", min_rt_gonogo, max_rt_gonogo)
+rt_violin_slow_gonogo <- create_gonogo_rt_violin(resp_gonogo_lento_rt, "Slow", min_rt_gonogo, max_rt_gonogo)
+
+# Arrange plots
+ggarrange(rt_density_fast_gonogo, rt_density_slow_gonogo,
+          rt_violin_fast_gonogo, rt_violin_slow_gonogo,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE)
+```
+
+```{r gonogo-individual-rt-density}
+#| fig.height: 20
+#| fig.width: 14
+#| fig.cap: "Individual participant RT density distributions for the Go/No-Go task. Panels show RT distributions for each participant separated by response type (Go Hit vs No-Go False Alarm) in (A-B) Fast and (C-D) Slow conditions."
+
+# Function to create RT density plot by subject for Go/No-Go
+create_gonogo_rt_density_by_subject <- function(data, condition_name, response_type, min_rt, max_rt) {
+  # Filter by response type
+  plot_data <- data %>%
+    filter(!is.na(RT_ms)) %>%
+    mutate(
+      response_category = case_when(
+        stimulus_type == "Go" & correct_response == "Correct" ~ "Go Hit",
+        stimulus_type == "No-Go" & correct_response == "Incorrect" ~ "No-Go False Alarm",
+        TRUE ~ "Other"
+      )
+    ) %>%
+    filter(response_category == response_type)
+  
+  if(nrow(plot_data) == 0) {
+    return(
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = paste("No", response_type, "data"), size = 6) +
+        theme_void() +
+        labs(title = paste(condition_name, "Condition -", response_type))
+    )
+  }
+  
+  # Create density plot
+  ggplot(plot_data, aes(x = RT_ms, color = response_category, fill = response_category)) +
+    geom_density(alpha = 0.3, size = 0.8) +
+    facet_wrap(~ Subject_label, ncol = 6, scales = "free_y") +
+    scale_color_manual(values = c("Go Hit" = "#2E86AB", 
+                                  "No-Go False Alarm" = "#E74C3C"),
+                       name = "Response Type") +
+    scale_fill_manual(values = c("Go Hit" = "#2E86AB", 
+                                 "No-Go False Alarm" = "#E74C3C"),
+                      name = "Response Type") +
+    labs(
+      title = paste(condition_name, "Condition -", response_type),
+      subtitle = "RT Distribution by Participant",
+      x = "Response Time (ms)",
+      y = "Density"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_text(size = 7),
+      axis.title = element_text(size = 10, face = "bold"),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 10, hjust = 0.5),
+      strip.text = element_text(size = 8, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8),
+      panel.grid.minor = element_blank()
+    ) +
+    scale_x_continuous(breaks = seq(floor(min_rt/500)*500, ceiling(max_rt/500)*500, 1000), 
+                       limits = c(min_rt, max_rt))
+}
+
+# Create plots for Fast condition
+fast_go_hits <- create_gonogo_rt_density_by_subject(resp_gonogo_rapido_num, "Fast", "Go Hit", 
+                                                    min_rt_gonogo, max_rt_gonogo)
+fast_false_alarms <- create_gonogo_rt_density_by_subject(resp_gonogo_rapido_num, "Fast", "No-Go False Alarm", 
+                                                         min_rt_gonogo, max_rt_gonogo)
+
+# Create plots for Slow condition
+slow_go_hits <- create_gonogo_rt_density_by_subject(resp_gonogo_lento_num, "Slow", "Go Hit", 
+                                                    min_rt_gonogo, max_rt_gonogo)
+slow_false_alarms <- create_gonogo_rt_density_by_subject(resp_gonogo_lento_num, "Slow", "No-Go False Alarm", 
+                                                         min_rt_gonogo, max_rt_gonogo)
+
+# Display plots
+ggarrange(fast_go_hits, fast_false_alarms,
+          slow_go_hits, slow_false_alarms,
+          ncol = 1, nrow = 4,
+          labels = c("A", "B", "C", "D"),
+          common.legend = FALSE,
+          heights = c(1, 1, 1, 1))
+```
+
+```{r gonogo-individual-analysis}
+#| fig.height: 16
+#| fig.width: 14
+#| fig.cap: "Individual participant analysis for the Go/No-Go task. (A) Signal detection performance plot showing hit rates vs false alarm rates. (B-C) Mean response times and (D-E) trial counts for each participant across stimulus types and response accuracy."
+
+# Calculate performance metrics by subject
+gonogo_summary_by_subject <- bind_rows(
+  resp_gonogo_rapido_num %>% mutate(condition = "Fast"),
+  resp_gonogo_lento_num %>% mutate(condition = "Slow")
+) %>%
+  group_by(Subject_label, condition, stimulus_type, correct_response) %>%
+  summarise(
+    n_trials = n(),
+    mean_RT = mean(RT_ms, na.rm = TRUE),
+    median_RT = median(RT_ms, na.rm = TRUE),
+    sd_RT = sd(RT_ms, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(Subject_label, condition, stimulus_type, correct_response)
+
+# Calculate hit rate and false alarm rate
+signal_detection_metrics <- bind_rows(
+  resp_gonogo_rapido_num %>% mutate(condition = "Fast"),
+  resp_gonogo_lento_num %>% mutate(condition = "Slow")
+) %>%
+  group_by(Subject_label, condition) %>%
+  summarise(
+    hits = sum(stimulus_type == "Go" & correct_response == "Correct"),
+    misses = sum(stimulus_type == "Go" & correct_response == "Incorrect"),
+    false_alarms = sum(stimulus_type == "No-Go" & correct_response == "Incorrect"),
+    correct_rejections = sum(stimulus_type == "No-Go" & correct_response == "Correct"),
+    hit_rate = hits / (hits + misses),
+    false_alarm_rate = false_alarms / (false_alarms + correct_rejections),
+    .groups = 'drop'
+  )
+
+# Create signal detection plot
+sdt_plot <- ggplot(signal_detection_metrics, aes(x = false_alarm_rate, y = hit_rate, color = condition)) +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_text(aes(label = Subject_label), size = 2.5, nudge_x = 0.02, nudge_y = 0.02) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.5) +
+  scale_color_manual(values = c("Fast" = "#E74C3C", "Slow" = "#3498DB"),
+                     name = "Condition") +
+  labs(
+    title = "Signal Detection Performance - Go/No-Go Task",
+    x = "False Alarm Rate",
+    y = "Hit Rate"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 12, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    legend.position = "bottom"
+  ) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2))
+
+# Calculate scale limits
+gonogo_rt_vals <- gonogo_summary_by_subject$mean_RT[!is.na(gonogo_summary_by_subject$mean_RT)]
+if(length(gonogo_rt_vals) > 0) {
+  gonogo_rt_min <- min(gonogo_rt_vals)
+  gonogo_rt_max <- max(gonogo_rt_vals)
+} else {
+  gonogo_rt_min <- 200
+  gonogo_rt_max <- 1000
+}
+
+count_min_gonogo <- 0
+count_max_gonogo <- max(gonogo_summary_by_subject$n_trials)
+
+# Create RT heatmap function for Go/No-Go
+create_gonogo_rt_heatmap <- function(data, condition_name, rt_min, rt_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, stimulus_type, mean_RT) %>%
+    mutate(mean_RT_rounded = round(mean_RT, 0))
+
+  ggplot(heatmap_data, aes(x = stimulus_type, y = Subject_label, fill = mean_RT)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = ifelse(is.na(mean_RT_rounded), "", mean_RT_rounded)), size = 3, color = "white") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "C", name = "Mean RT (ms)", limits = c(rt_min, rt_max), na.value = "grey50") +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Stimulus Type",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create count heatmap function for Go/No-Go
+create_gonogo_count_heatmap <- function(data, condition_name, count_min, count_max) {
+  heatmap_data <- data %>%
+    filter(condition == condition_name) %>%
+    select(Subject_label, correct_response, stimulus_type, n_trials) %>%
+    # Calculate total trials per subject and stimulus type
+    group_by(Subject_label, stimulus_type) %>%
+    mutate(
+      total_per_stimulus = sum(n_trials),
+      percentage = round((n_trials / total_per_stimulus) * 100, 1)
+    ) %>%
+    ungroup()
+
+  ggplot(heatmap_data, aes(x = stimulus_type, y = Subject_label, fill = n_trials)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = paste0(n_trials, "(", percentage, "%)")), 
+              size = 2.5, color = "white", fontface = "bold") +
+    facet_wrap(~ correct_response, ncol = 2) +
+    scale_fill_viridis_c(option = "D", name = "Number of Trials", limits = c(count_min, count_max)) +
+    labs(
+      title = paste(condition_name, "Condition"),
+      x = "Stimulus Type",
+      y = "Participant"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9, face = "bold"),
+      axis.text.y = element_text(size = 8),
+      axis.title = element_text(size = 11, face = "bold"),
+      plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+      strip.text = element_text(size = 11, face = "bold"),
+      legend.position = "right"
+    )
+}
+
+# Create all heatmaps
+heatmap_fast_rt_gonogo <- create_gonogo_rt_heatmap(gonogo_summary_by_subject, "Fast", gonogo_rt_min, gonogo_rt_max)
+heatmap_slow_rt_gonogo <- create_gonogo_rt_heatmap(gonogo_summary_by_subject, "Slow", gonogo_rt_min, gonogo_rt_max)
+heatmap_fast_count_gonogo <- create_gonogo_count_heatmap(gonogo_summary_by_subject, "Fast", count_min_gonogo, count_max_gonogo)
+heatmap_slow_count_gonogo <- create_gonogo_count_heatmap(gonogo_summary_by_subject, "Slow", count_min_gonogo, count_max_gonogo)
+
+# Arrange plots
+ggarrange(sdt_plot, NULL,
+          heatmap_fast_rt_gonogo, heatmap_slow_rt_gonogo,
+          heatmap_fast_count_gonogo, heatmap_slow_count_gonogo,
+          ncol = 2, nrow = 3,
+          labels = c("A", "", "B", "C", "D", "E"),
+          common.legend = FALSE,
+          heights = c(0.8, 1, 1))
+```
+
+# Hipótesis conductual 
+
+Los análisis descriptivos de las tareas Flanker y Go/No-Go demuestran que ambos paradigmas involucran exitosamente facetas distintas pero relacionadas del control cognitivo. La tarea Flanker pone a prueba el sistema responsable de resolver el conflicto entre representaciones de respuesta competidoras, mientras que la tarea Go/No-Go examina el sistema para la cancelación total de una respuesta. La manipulación de la velocidad de respuesta (condiciones Rápida vs. Lenta) sugiere además que la eficiencia de estos mecanismos de control es modulada por la disponibilidad de recursos preparatorios, empujando al sistema cognitivo a depender más de ajustes reactivos bajo presión de tiempo.
+
+Los hallazgos descriptivos proporcionan evidencia empírica específica que fundamenta nuestra hipótesis. En la tarea Flanker, observamos un robusto Efecto de Compatibilidad Flanker (FCE) que se manifiesta tanto en precisión como en tiempos de respuesta. En la condición rápida, el FCE en precisión fue del 11.75%, aumentando paradójicamente al 20.85% en la condición lenta. Este incremento inesperado sugiere que cuando se reduce la presión temporal, los participantes no necesariamente mejoran su capacidad para resolver el conflicto; en cambio, pueden experimentar mayor interferencia debido a procesamiento más elaborado de los distractores o lapsos en el control proactivo. De manera similar, en la tarea Go/No-Go, la tasa de falsas alarmas aumentó del 17.9% en la condición rápida al 29.9% en la condición lenta, un patrón que refleja una desestabilización comparable del control inhibitorio cuando se reduce la urgencia temporal.
+
+Esta confluencia de observaciones conduce a una pregunta más profunda que simplemente si las tareas miden la "inhibición". Los datos sugieren que bajo presión temporal, ambas tareas convergen en demandar un tipo específico de control cognitivo: el control reactivo rápido. Los ensayos más exigentes en este experimento son, posiblemente, los ensayos incongruentes en la tarea Flanker Rápida y los ensayos No-Go en la tarea Go/No-Go Rápida. Ambos escenarios requieren una explosión de control rápida y transitoria para superar una tendencia de respuesta potente, conflictiva o impulsiva. Los análisis de diferencias individuales refuerzan esta interpretación: observamos variabilidad sustancial entre participantes en ambas tareas, con algunos individuos (como S5 y S6) mostrando respuestas consistentemente rápidas y otros (como S18 y S24) exhibiendo perfiles más cautelosos a través de las tareas.
+
+Un aspecto particularmente revelador emerge del análisis de las curvas temporales. En ambas tareas, los efectos de conflicto e inhibición se mantienen estables a lo largo del experimento, sin evidencia de mejora significativa con la práctica. Las curvas de aprendizaje de la tarea Flanker muestran que la separación entre las tasas de error para estímulos congruentes e incongruentes permanece constante a través de los 600 ensayos. Similarmente, en la tarea Go/No-Go, las tasas de falsas alarmas no muestran una tendencia de mejora sistemática. Esta persistencia sugiere que el control cognitivo reactivo representa una limitación fundamental del sistema que no se supera fácilmente mediante la práctica a corto plazo.
+
+Los patrones de tiempos de respuesta proporcionan evidencia convergente adicional. En la tarea Flanker, el costo de TR para los ensayos incongruentes (~100 ms) refleja el tiempo adicional necesario para resolver el conflicto. En la tarea Go/No-Go, las falsas alarmas muestran TRs comparables o incluso más rápidos que los aciertos Go, consistente con fallas en el reclutamiento del control inhibitorio. Estos patrones temporales sugieren que cuando el control reactivo falla o es insuficiente, las respuestas resultantes reflejan el procesamiento automático no controlado.
+
+Un individuo con un sistema de control reactivo altamente eficiente debería ser hábil tanto para suprimir rápidamente la influencia de los flancos incongruentes como para cancelar un comando motor impulsivo bajo presión de tiempo. Por el contrario, se esperaría que un individuo con un sistema menos eficiente tuviera dificultades en ambos dominios, lo que llevaría a más errores de conflicto (respuestas incorrectas en ensayos incongruentes de Flanker) y más errores de inhibición (falsas alarmas en ensayos No-Go). Los datos descriptivos muestran precisamente este tipo de variabilidad individual, con algunos participantes manteniendo alta precisión en ambas tareas mientras otros muestran deterioro sustancial cuando se requiere control reactivo.
+
+Este vínculo propuesto no es simplemente una declaración general sobre la capacidad cognitiva, sino una predicción específica sobre la covariación del rendimiento en condiciones que estresan al máximo el control reactivo. La evidencia descriptiva sugiere que esta relación será más débil o ausente en las condiciones Lentas, donde observamos patrones cualitativamente diferentes. El incremento paradójico en los errores durante las condiciones lentas (FCE del 20.85% y falsas alarmas del 29.9%) indica que los participantes no simplemente tienen más tiempo para aplicar los mismos mecanismos de control; en cambio, la dinámica del control cambia fundamentalmente, posiblemente involucrando mayor variabilidad en las estrategias, fluctuaciones atencionales, o intentos subóptimos de control proactivo.
+
+Esta línea de razonamiento, fundamentada en los patrones empíricos observados, culmina en la siguiente hipótesis conductual formal:
+
+La eficiencia del control cognitivo reactivo constituye un factor subyacente común que limita el rendimiento tanto en tareas de resolución de conflictos como de inhibición de la respuesta bajo presión de tiempo. Basándonos en los análisis descriptivos, específicamente que:
+
+- $H1$: Las diferencias individuales en la capacidad para resolver el conflicto de respuesta en la tarea Flanker Rápida (medida como la precisión en los ensayos incongruentes, donde observamos un rango del 60% al 95% entre participantes) estarán positivamente correlacionadas con la capacidad para inhibir una respuesta en la tarea Go/No-Go Rápida (medida como la precisión en los ensayos No-Go, donde observamos un rango similar del 60% al 98% entre participantes).
+
+- $H2$: Esta correlación será significativamente atenuada o inexistente en las condiciones Lentas, donde los efectos paradójicos observados (mayor FCE y mayor tasa de falsas alarmas) sugieren que la reducción en la presión temporal permite una disociación estratégica entre las dos tareas, con diferentes participantes adoptando diferentes estrategias de control proactivo o experimentando diferentes tipos de fluctuaciones atencionales.
+
+- $H3$: La fuerza de la correlación en la condición Rápida reflejará la dependencia compartida de ambas tareas en un sistema de control reactivo de capacidad limitada, mientras que la ausencia de correlación en la condición Lenta reflejará la disponibilidad de rutas alternativas de control cuando la presión temporal es reducida.
+
+Esta hipótesis se basa directamente en los patrones observados en los datos: la robustez y estabilidad de los efectos de conflicto e inhibición, la modulación paradójica por la velocidad, y la variabilidad individual sustancial pero sistemática. El modelado computacional mediante el DDM permitirá descomponer estos efectos conductuales en sus componentes cognitivos subyacentes, proporcionando una prueba más precisa de esta hipótesis al nivel de los parámetros latentes del procesamiento de información.
+
+
+# Metodología
+
+## El Modelo de Deriva-Difusión como Marco Teórico
+
+Para investigar los mecanismos cognitivos subyacentes al control reactivo, se empleó el Modelo de Deriva-Difusión (DDM), un modelo computacional que ha demostrado ser particularmente efectivo para descomponer el rendimiento en tareas de tiempo de reacción en sus componentes cognitivos constituyentes [@roger_ratcliff_9b67a1e1;@joshua_bolam_cfa27db6;@marius_barth_089bb8c7]. El DDM conceptualiza la toma de decisiones como un proceso estocástico de acumulación de evidencia, donde la información sensorial se integra continuamente hasta alcanzar un criterio de decisión [@joshua_bolam_cfa27db6]. Esta formulación matemática permite separar aspectos del procesamiento que están confundidos en las medidas conductuales tradicionales, proporcionando una ventana hacia los procesos latentes que subyacen al control cognitivo [@llu_s_hern_ndez_navarro_cd1e00c4].
+
+### Formulación Matemática del DDM
+
+El proceso de decisión se modela mediante la ecuación diferencial estocástica:
+
+$$dx(t) = v \cdot dt + s \cdot dW(t)$$
+
+Esta ecuación describe cómo la evidencia $x(t)$ evoluciona en el tiempo bajo la influencia de dos fuerzas: una componente determinística representada por la tasa de deriva $v$, que refleja la calidad y dirección de la información sensorial, y una componente estocástica $s \cdot dW(t)$ que captura el ruido inherente en el procesamiento neural. El parámetro $v$ es particularmente relevante para la hipótesis planteada, ya que cuantifica la eficiencia con la que el sistema cognitivo puede extraer información relevante del estímulo mientras suprime el ruido y la interferencia.
+
+El proceso de acumulación comienza en un punto inicial $x(0) = z \cdot a$, donde $z$ representa la posición relativa entre los dos umbrales de decisión. Este punto de inicio puede reflejar expectativas, sesgos estratégicos o asimetrías en la preparación de respuesta. El proceso continúa hasta que la evidencia acumulada alcanza uno de dos umbrales: el umbral superior en $x(t) = a$ o el umbral inferior en $x(t) = 0$. La separación entre estos umbrales, parametrizada por $a$, representa un aspecto fundamental del control cognitivo: la política de intercambio entre velocidad y precisión adoptada por el participante.
+
+El tiempo de respuesta observado incluye no solo el tiempo de decisión sino también componentes no decisorios:
+
+$$RT = t_{decisión} + t_0$$
+
+donde $t_0$ captura el tiempo necesario para la codificación sensorial inicial del estímulo y la ejecución motora de la respuesta. Esta descomposición es crucial porque permite aislar los procesos de decisión central de los procesos periféricos, proporcionando una medida más pura de la eficiencia del control cognitivo [@llu_s_hern_ndez_navarro_cd1e00c4].
+
+### Parametrización del Modelo Wiener
+
+En la implementación actual, se utilizó la parametrización del modelo Wiener, que proporciona soluciones analíticas para las distribuciones de tiempo de respuesta. Esta parametrización utiliza cuatro parámetros principales, cada uno con una interpretación psicológica específica [@helen_steingroever_2463ee12].
+
+La **tasa de deriva ($\mu$)** representa la velocidad promedio de acumulación de evidencia hacia el umbral correcto. En el contexto de las tareas experimentales, este parámetro captura aspectos centrales del control cognitivo. Para la tarea Flanker, $\mu$ refleja la capacidad de extraer información del estímulo objetivo mientras se suprime la interferencia de los flancos. Una reducción en $\mu$ para ensayos incongruentes cuantifica el costo cognitivo del conflicto. Para la tarea Go/No-Go, $\mu$ representa la fuerza de la evidencia hacia ejecutar o inhibir la respuesta, con valores negativos en ensayos No-Go indicando la acumulación de evidencia hacia la inhibición.
+
+La **separación de umbrales ($bs$)** cuantifica la cantidad total de evidencia requerida antes de comprometerse con una respuesta. Este parámetro captura diferencias individuales y ajustes estratégicos en el criterio de decisión. Valores mayores de $bs$ indican una estrategia más conservadora que prioriza la precisión, mientras que valores menores reflejan énfasis en la velocidad. La modulación de $bs$ por la condición de velocidad proporciona una medida directa de cómo los participantes ajustan su criterio de respuesta bajo diferentes demandas temporales.
+
+El **tiempo no decisorio ($ndt$)** amalgama todos los procesos que ocurren fuera del proceso de acumulación de evidencia central. Esto incluye el tiempo necesario para la codificación perceptual inicial del estímulo, la transformación de la decisión abstracta en un comando motor específico, y la ejecución física de la respuesta. Aunque estos procesos son periféricos a la hipótesis sobre control cognitivo, su estimación precisa es necesaria para obtener medidas no contaminadas de los parámetros de decisión.
+
+El **sesgo de respuesta ($bias$)** especifica la posición relativa del punto de inicio entre los umbrales. Un valor de 0.5 indica no sesgo (equidistante de ambos umbrales), mientras que valores mayores indican sesgo hacia el umbral superior. Este parámetro es particularmente relevante para la tarea Go/No-Go, donde se espera un sesgo sistemático hacia la respuesta Go debido a su alta frecuencia.
+
+## Preparación y Estructuración de Datos
+
+La preparación de datos constituye un paso crítico para asegurar la validez del modelado computacional. Los datos brutos requieren transformación y filtrado cuidadosos para cumplir con los supuestos del modelo y eliminar respuestas que no reflejan el proceso de interés.
+
+### Criterios de Filtrado Temporal
+
+Se aplicaron criterios de exclusión basados en la plausibilidad psicológica y las limitaciones del paradigma experimental. Se excluyeron respuestas con tiempos menores a 150 ms, ya que estos reflejan respuestas anticipatorias que no pueden basarse en el procesamiento del estímulo presentado [@georgios_d__sideridis_7ef466db]. El límite superior se estableció diferencialmente según la condición: 2.0 segundos para la condición rápida y 4.5 segundos para la condición lenta, reflejando los diferentes plazos permitidos en cada condición. Estos criterios resultaron en la exclusión de menos del 2% de los ensayos, sugiriendo que los participantes generalmente mantuvieron el compromiso con la tarea.
+
+### Codificación de Respuestas para el Modelo
+
+La codificación de respuestas requiere mapear las respuestas observadas a los umbrales del modelo de manera consistente con la teoría. Para la tarea Flanker, se estableció que el umbral superior (codificado como 1) corresponde a respuestas "derecha" para los patrones >>>>> y >><>>, mientras que el umbral inferior (codificado como 0) corresponde a respuestas "izquierda" para los patrones <<<<< y <<><<. Las respuestas incorrectas se codifican como el umbral opuesto, permitiendo al modelo capturar tanto respuestas correctas como errores dentro del mismo marco.
+
+Para la tarea Go/No-Go, la codificación refleja la naturaleza de la decisión inhibitoria. El umbral superior (1) representa la ejecución de la respuesta (Go), mientras que el umbral inferior (0) representa la inhibición exitosa (No-Go). Un aspecto crítico de esta codificación es el tratamiento de las no-respuestas: cuando un participante exitosamente inhibe en un ensayo No-Go, no hay RT observable. En estos casos, se asignó el tiempo límite de la condición como RT y se codificó la respuesta como 0, permitiendo al modelo tratar la inhibición exitosa como evidencia acumulada hacia el umbral de "no responder".
+
+## Especificación del Modelo Jerárquico Bayesiano
+
+La estructura jerárquica de los modelos aborda un desafío fundamental en el modelado cognitivo: cómo obtener estimaciones estables de parámetros individuales mientras se reconoce que los participantes provienen de una población común. Esta estructura es útil dado que se observaron participantes con muy pocos errores en algunas condiciones.
+
+### Estructura Jerárquica para la Tarea Flanker
+
+El modelo jerárquico para la tarea Flanker especifica que cada tiempo de respuesta observado surge de un proceso Wiener con parámetros que varían según las condiciones experimentales y entre participantes:
+
+$$RT_{ij} \sim \text{Wiener}(\mu_{ij}, bs_{ij}, ndt_i, bias_i)$$
+
+donde $i$ indexa participantes y $j$ indexa ensayos. Esta notación indica que algunos parámetros varían tanto entre participantes como entre ensayos (drift rate y boundary separation), mientras que otros solo varían entre participantes (non-decision time y bias).
+
+La tasa de deriva se modela incorporando el efecto principal de congruencia y permitiendo que tanto el nivel base como el efecto de congruencia varíen entre participantes:
+
+$$\mu_{ij} = \beta_0^{\mu} + \beta_1^{\mu} \cdot \text{Incongruente}_{j} + u_i^{\mu} + u_{i,incongruente}^{\mu}$$
+
+Esta especificación captura varios aspectos importantes. El parámetro $\beta_0^{\mu}$ representa la tasa de deriva promedio poblacional para ensayos congruentes, estableciendo el nivel base de eficiencia de procesamiento cuando no hay conflicto. El parámetro $\beta_1^{\mu}$ cuantifica el efecto promedio de la incongruencia en la población, esperándose un valor negativo que refleje la reducción en la calidad de evidencia debido al conflicto. Los términos $u_i^{\mu}$ y $u_{i,incongruente}^{\mu}$ capturan las desviaciones individuales del participante $i$ respecto a estos promedios poblacionales, permitiendo que algunos participantes sean generalmente más eficientes y que el efecto del conflicto varíe entre individuos.
+
+La separación de umbrales se modela similarmente, pero con una transformación exponencial para asegurar valores positivos:
+
+$$bs_{ij} = \exp(\beta_0^{bs} + \beta_1^{bs} \cdot \text{Lento}_{j} + u_i^{bs} + u_{i,lento}^{bs})$$
+
+Aquí, $\beta_0^{bs}$ representa el log-umbral base en la condición rápida, mientras que $\beta_1^{bs}$ captura el cambio al pasar a la condición lenta. Se espera que $\beta_1^{bs} > 0$, indicando umbrales más conservadores cuando se reduce la presión temporal. Los efectos aleatorios permiten heterogeneidad individual tanto en el nivel base de cautela como en el ajuste estratégico entre condiciones.
+
+### Distribuciones A Priori Informativas
+
+La especificación de priors apropiados es crucial para la estimación bayesiana estable. Basándose en estudios previos de DDM y en los rangos plausibles de los parámetros, se especificaron priors informativos pero no excesivamente restrictivos [@zekai_jin_7f33ab73;@michael_lee_9c346d35;@n__han_tran_e781cb15].
+
+Para la tasa de deriva base en ensayos congruentes, se especificó $\beta_0^{\mu} \sim \mathcal{N}(2, 1)$, centrando el prior en un valor positivo moderado-alto que refleja procesamiento eficiente en ausencia de conflicto. El efecto de incongruencia recibe el prior $\beta_1^{\mu} \sim \mathcal{N}(-1, 0.5)$, anticipando una reducción sustancial pero no catastrófica en la eficiencia de procesamiento. Estos priors permiten flexibilidad mientras desalientan valores implausibles.
+
+Para la separación de umbrales en escala logarítmica, se utilizó $\beta_0^{bs} \sim \mathcal{N}(1.5, 0.5)$, lo que en la escala original corresponde a umbrales alrededor de 4.5 unidades de evidencia, consistente con estudios previos en tareas de conflicto. El efecto de velocidad recibe el prior $\beta_1^{bs} \sim \mathcal{N}(-0.5, 0.25)$, esperando una reducción moderada en los umbrales bajo presión temporal.
+
+Las desviaciones estándar de los efectos aleatorios siguen distribuciones Cauchy semi-positivas, por ejemplo $\sigma \sim \text{Cauchy}^+(0, 0.5)$. La distribución Cauchy tiene colas más pesadas que la normal, permitiendo ocasionalmente efectos aleatorios grandes mientras mantiene la masa de probabilidad concentrada cerca de cero. Esto es apropiado para modelar diferencias individuales donde se espera que la mayoría de participantes estén cerca del promedio pero permitiendo outliers ocasionales.
+
+## Especificación del Modelo para Go/No-Go
+
+El modelo para la tarea Go/No-Go sigue una estructura similar pero con modificaciones importantes que reflejan la naturaleza única del paradigma de inhibición. La diferencia fundamental radica en cómo se conceptualiza la decisión: mientras en Flanker ambas respuestas son acciones motoras activas, en Go/No-Go una "respuesta" es la inhibición activa de una acción impulsiva.
+
+La tasa de deriva en Go/No-Go captura la competencia entre la tendencia impulsiva a responder y la señal de control que indica inhibición:
+
+$$\mu_{ij} = \beta_0^{\mu} + \beta_1^{\mu} \cdot \text{NoGo}_{j} + u_i^{\mu} + u_{i,NoGo}^{\mu}$$
+
+El parámetro $\beta_0^{\mu}$ representa la deriva base hacia el umbral "Go", esperándose un valor positivo sustancial que refleje la prepotencia establecida por la alta frecuencia de ensayos Go. El parámetro crítico $\beta_1^{\mu}$ cuantifica el cambio en la deriva para ensayos No-Go. Se especificó un prior $\beta_1^{\mu} \sim \mathcal{N}(-3, 1)$, anticipando un cambio negativo grande que refleje la fuerte evidencia hacia la inhibición requerida en estos ensayos. La magnitud de este cambio es mayor que el efecto de incongruencia en Flanker, reflejando que la inhibición completa es un proceso más demandante que la resolución de conflicto.
+
+Un aspecto único del modelo Go/No-Go es el tratamiento del sesgo de respuesta. Dado el diseño 80/20, se espera un sesgo sistemático hacia responder. Esto se captura en el parámetro bias con prior $\beta_0^{bias} \sim \mathcal{N}(0.5, 0.5)$ en escala logit, que tras la transformación inversa-logit corresponde a un punto de inicio más cercano al umbral "Go".
+
+## Implementación Computacional y Estimación
+
+La estimación de modelos DDM jerárquicos presenta desafíos computacionales significativos debido a la complejidad de la función de verosimilitud Wiener y la alta dimensionalidad del espacio de parámetros. Se emplearon métodos de inferencia bayesiana que han demostrado ser efectivos para estos modelos.
+
+### Algoritmo No-U-Turn Sampler (NUTS)
+
+Se utilizó el No-U-Turn Sampler, una extensión sofisticada del Hamiltonian Monte Carlo que automatiza la selección de parámetros de ajuste críticos. NUTS utiliza la geometría de la distribución posterior para realizar propuestas eficientes, resultando en mejor exploración del espacio de parámetros comparado con métodos tradicionales. El algoritmo construye trayectorias en el espacio de parámetros siguiendo las ecuaciones de Hamilton, donde el gradiente del log-posterior actúa como una "fuerza" que guía la exploración hacia regiones de alta probabilidad [@fareed_sheriff_359eca61].
+
+La implementación requirió especificaciones cuidadosas para asegurar convergencia robusta. Se ejecutaron 5 cadenas independientes, cada una con 8,000 iteraciones totales. Las primeras 2,000 iteraciones constituyeron la fase de calentamiento, durante la cual el algoritmo adapta sus parámetros internos (como la longitud de paso y la matriz de masa) para optimizar la eficiencia del muestreo. Esto resultó en 6,000 iteraciones efectivas por cadena, proporcionando 30,000 muestras posteriores totales para inferencia.
+
+Un parámetro crítico de control fue `adapt_delta = 0.99`, que controla el tamaño de paso del algoritmo. Valores altos de adapt_delta resultan en pasos más pequeños y cuidadosos, reduciendo la probabilidad de divergencias numéricas en regiones de alta curvatura de la posterior. Aunque esto aumenta el tiempo computacional, es necesario para la exploración confiable de modelos jerárquicos complejos.
+
+### Extracción y Regularización de Parámetros Individuales
+
+Una ventaja clave del enfoque jerárquico es la estimación regularizada de parámetros individuales mediante "préstamo de fuerza" estadística. Los parámetros individuales se reconstruyen combinando efectos fijos y aleatorios:
+
+$$\theta_i = \beta + u_i$$
+
+Esta reconstrucción proporciona estimaciones que balancean la información individual con la información grupal. Para participantes con muchos datos informativos (por ejemplo, muchos errores en ambas condiciones), las estimaciones se basan principalmente en sus propios datos. Para participantes con datos escasos (por ejemplo, pocos errores), las estimaciones se "contraen" hacia la media grupal, proporcionando regularización automática que previene sobreajuste.
+
+## Análisis de Eficiencias y Prueba de la Hipótesis Principal
+
+El paso final y crítico del análisis involucra extraer medidas de eficiencia cognitiva de los parámetros estimados del DDM y examinar su correlación entre tareas. Este análisis proporciona una prueba directa de la hipótesis sobre mecanismos compartidos de control reactivo.
+
+### Construcción de Índices de Eficiencia
+
+Para la tarea Flanker, se definió la eficiencia como la capacidad de mantener procesamiento de alta calidad ante conflicto:
+
+$$E_i^{Flanker} = -\hat{\beta}_{1,i}^{\mu}$$
+
+donde $\hat{\beta}_{1,i}^{\mu}$ es el efecto de incongruencia estimado para el participante $i$ (combinando efectos fijos y aleatorios). La negación convierte el efecto típicamente negativo en una medida positiva donde valores más altos indican mejor mantenimiento de la eficiencia bajo conflicto. Un participante con $E_i^{Flanker} = 0.5$ experimenta una reducción de solo 0.5 unidades en la tasa de deriva debido a incongruencia, mientras que uno con $E_i^{Flanker} = 2.0$ sufre una reducción mayor, indicando peor control de conflicto.
+
+Para Go/No-Go, la eficiencia inhibitoria se conceptualiza como la capacidad de generar evidencia hacia la inhibición cuando se requiere:
+
+$$E_i^{Go/No-Go} = -(\hat{\beta}_{0,i}^{\mu} + \hat{\beta}_{1,i}^{\mu})$$
+
+Esta medida representa la tasa de deriva neta en ensayos No-Go. Valores más positivos indican que el participante puede generar evidencia más fuerte hacia el umbral de inhibición, superando más efectivamente la impulsividad hacia responder. Un participante con alta eficiencia inhibitoria acumula evidencia rápidamente hacia "no responder" cuando detecta un estímulo No-Go.
+
+### Modelo de Correlación Bayesiana
+
+Para examinar la relación entre las eficiencias en ambas tareas, se especificó un modelo de regresión lineal bayesiana:
+
+$$E_i^{Go/No-Go} = \gamma_0 + \gamma_1 \cdot E_i^{Flanker} + \epsilon_i$$
+
+donde:
+- $\gamma_0$ representa el nivel base de eficiencia inhibitoria
+- $\gamma_1$ es el coeficiente crítico que cuantifica la relación entre eficiencias
+- $\epsilon_i \sim \mathcal{N}(0, \sigma^2)$ captura variabilidad residual
+
+La hipótesis de control reactivo compartido predice $\gamma_1 > 0$: participantes que mantienen mejor eficiencia bajo conflicto en Flanker también deberían mostrar mejor capacidad inhibitoria en Go/No-Go. Se especificaron priors débilmente informativos $\gamma_0, \gamma_1 \sim \mathcal{N}(0, 1)$ que permiten tanto correlaciones positivas como negativas sin sesgo a priori.
+
+### Inferencia sobre la Hipótesis
+
+La estimación bayesiana proporciona la distribución posterior completa de $\gamma_1$, permitiendo inferencia sobre la hipótesis. Más allá de la simple significancia, se puede examinar:
+
+- La probabilidad posterior de que $\gamma_1 > 0$: $P(\gamma_1 > 0 | \text{datos})$
+- El tamaño del efecto más probable y su incertidumbre
+- La evidencia relativa para presencia vs ausencia de correlación
+
+Esta aproximación proporciona una evaluación matizada de la evidencia para mecanismos compartidos de control reactivo, culminando la investigación desde los datos conductuales brutos hasta inferencias sobre arquitectura cognitiva latente [@sakyasingha_dasgupta_4006a7de].
+
+## Consideraciones de Validez y Robustez
+
+La validez de las conclusiones depende críticamente de varios supuestos y decisiones de modelado. Primero, el DDM asume que el proceso de decisión puede caracterizarse adecuadamente por un proceso de difusión unidimensional. Aunque esta es una simplificación de la realidad neural, décadas de investigación han validado su utilidad para capturar aspectos esenciales de la decisión. Segundo, la interpretación de los parámetros como reflejando procesos cognitivos específicos (por ejemplo, drift rate como eficiencia de procesamiento) se basa en validación convergente de estudios neurocientíficos, farmacológicos y de diferencias individuales. Sin embargo, se reconoce que estos parámetros son constructos latentes que probablemente amalgaman múltiples procesos neurales.
+
+
+# Resultados
+
+## Efectos Poblacionales del Modelo de Deriva-Difusión
+
+Los modelos jerárquicos bayesianos convergieron satisfactoriamente para ambas tareas, con todos los parámetros mostrando valores de $\hat{R} < 1.01$ y tamaños efectivos de muestra superiores a 1000. Las estimaciones de los efectos fijos poblacionales proporcionan información fundamental sobre los procesos cognitivos subyacentes a cada tarea.
+
+### Tarea Flanker
+
+La Tabla 1 presenta los efectos fijos estimados para el modelo DDM de la tarea Flanker. El intercepto de la tasa de deriva, que representa el procesamiento base en ensayos congruentes, mostró un valor de 2.503 (SE = 1.026, IC 95%: 0.514 - 4.491), indicando una acumulación de evidencia eficiente cuando no hay conflicto presente. El efecto crítico de la incongruencia sobre la tasa de deriva fue significativamente negativo, con una estimación de -1.001 (SE = 0.503, IC 95%: -1.987 - -0.024). Este resultado confirma que los estímulos incongruentes deterioran sustancialmente la calidad del procesamiento de información, reduciendo la tasa de deriva en aproximadamente una unidad.
+
+El parámetro de separación de umbrales mostró un intercepto de 1.775 (SE = 0.518, IC 95%: 0.776 - 2.791) en la condición rápida, representando el nivel base de cautela cuando existe presión temporal. El efecto de la condición lenta sobre los umbrales fue significativo y negativo (-0.500, SE = 0.248, IC 95%: -0.980 - -0.004). Este resultado aparentemente paradójico requiere interpretación cuidadosa: dado que el modelo utiliza una parametrización logarítmica para los umbrales, un efecto negativo indica que los participantes adoptaron umbrales más estrechos (menos conservadores) en la condición lenta comparada con la rápida. Este hallazgo es consistente con los análisis descriptivos que mostraron mayor efecto de congruencia en la condición lenta, sugiriendo que la reducción de presión temporal no necesariamente mejora el control cognitivo.
+
+El tiempo no decisorio mostró una estimación de -1.000 (SE = 0.504, IC 95%: -1.985 - -0.003) en escala logarítmica, correspondiendo a aproximadamente 368 ms en la escala original. Este valor captura el tiempo combinado de codificación perceptual y ejecución motora. El parámetro de sesgo de respuesta no mostró desviación significativa de cero (0.000, SE = 0.502, IC 95%: -0.971 - 0.985), indicando ausencia de preferencia sistemática por respuestas izquierda o derecha a nivel poblacional.
+
+La Figura 11A visualiza las distribuciones posteriores de los efectos principales, mostrando claramente que el efecto de incongruencia sobre la tasa de deriva es robusto y negativo, mientras que el efecto de velocidad sobre los umbrales, aunque significativo, es de menor magnitud. La clara separación de la distribución posterior del efecto de incongruencia respecto a cero proporciona fuerte evidencia para el deterioro en el procesamiento causado por el conflicto flanker.
+
+### Tarea Go/No-Go
+
+Los resultados del modelo Go/No-Go, presentados en la Tabla 2, revelan patrones distintivos que reflejan la naturaleza única del paradigma de inhibición. El intercepto de la tasa de deriva fue 2.088 (SE = 1.012, IC 95%: 0.078 - 4.125), representando la fuerte tendencia hacia la respuesta "Go" establecida por el diseño 80/20. El efecto del tipo de estímulo fue dramático: los ensayos No-Go mostraron una reducción en la tasa de deriva de -2.998 (SE = 0.990, IC 95%: -4.976 - -1.072). Esta reducción de casi 3 unidades es sustancialmente mayor que el efecto de incongruencia observado en Flanker, reflejando la demanda cognitiva extrema de inhibir completamente una respuesta.
+
+La combinación del intercepto positivo y el fuerte efecto negativo de No-Go resulta en una tasa de deriva neta cercana a cero o ligeramente negativa para los ensayos No-Go, indicando que la evidencia se acumula débilmente hacia el umbral de inhibición. Este patrón es consistente con las altas tasas de falsas alarmas observadas y sugiere que la inhibición exitosa requiere no solo detener la acumulación hacia "Go" sino revertir activamente el proceso de decisión.
+
+El parámetro de separación de umbrales mostró un intercepto de 1.744 (SE = 0.513, IC 95%: 0.738 - 2.742) con un efecto de velocidad de -0.499 (SE = 0.254, IC 95%: -1.010 - -0.007), replicando el patrón observado en Flanker. Los participantes adoptaron criterios menos conservadores en la condición lenta, consistente con el incremento paradójico en falsas alarmas observado en los análisis descriptivos.
+
+Un hallazgo crítico es el sesgo de respuesta significativo hacia "Go" (0.504, SE = 0.506, IC 95%: -0.469 - 1.498). Aunque el intervalo de credibilidad incluye valores cercanos a cero, la estimación puntual sugiere que el punto de inicio del proceso de decisión está sesgado hacia el umbral "Go", reflejando la respuesta establecida por la alta frecuencia de estos ensayos. Este sesgo contribuye a la dificultad de inhibir respuestas en ensayos No-Go, ya que el proceso debe recorrer mayor distancia para alcanzar el umbral de inhibición.
+
+## Diferencias Individuales en los Parámetros del Modelo
+
+Las Figuras 12 y 15 presentan las estimaciones individuales de los efectos clave, revelando heterogeneidad sustancial entre participantes que va más allá de la variabilidad de muestreo. Esta variabilidad sistemática es precisamente lo que permite examinar correlaciones entre tareas y probar hipótesis sobre mecanismos cognitivos compartidos.
+
+### Variabilidad en el Procesamiento de Conflicto
+
+La Figura 12A muestra las estimaciones individuales del efecto de incongruencia sobre la tasa de deriva en la tarea Flanker. Mientras todos los participantes muestran efectos negativos (confirmando la universalidad del FCE), la magnitud varía considerablemente. El participante 9 muestra el menor deterioro por incongruencia (aproximadamente -0.5 unidades), sugiriendo procesamiento eficiente que mantiene alta calidad incluso ante conflicto. En contraste, el participante 16 muestra un efecto superior a -3 unidades, indicando vulnerabilidad sustancial a la interferencia de los flancos.
+
+Esta variabilidad no puede atribuirse simplemente a ruido de estimación. Los intervalos de credibilidad del 95% para la mayoría de participantes no se solapan, indicando diferencias genuinas en la eficiencia del procesamiento de conflicto. Además, la estructura jerárquica del modelo proporciona regularización que reduce la influencia del ruido de muestreo, especialmente para participantes con menos datos informativos.
+
+### Variabilidad en la Capacidad Inhibitoria
+
+La Figura 12B presenta las diferencias individuales en el efecto No-Go para la tarea Go/No-Go. Nuevamente, se observa variabilidad sustancial, con efectos que van desde aproximadamente -1.5 hasta -5 unidades. Los participantes 11 y 6 muestran los efectos menos negativos, sugiriendo dificultad para generar evidencia hacia la inhibición. En el extremo opuesto, participantes como 15 y 9 muestran efectos fuertemente negativos, indicando capacidad superior para revertir la tendencia impulsiva hacia responder.
+
+Un patrón notable es que la variabilidad entre participantes es mayor para Go/No-Go que para Flanker, como evidencian los rangos más amplios de las estimaciones y la mayor dispersión de los intervalos de credibilidad. Esta mayor heterogeneidad en la capacidad inhibitoria es consistente con la literatura que sugiere que la inhibición de respuesta muestra diferencias individuales más pronunciadas que la resolución de conflicto.
+
+### Estrategias de Velocidad-Precisión
+
+La Figura 15 examina las diferencias individuales en cómo los participantes ajustan sus umbrales de decisión entre condiciones de velocidad. Para la tarea Flanker (panel A), la mayoría de participantes muestran efectos negativos, indicando umbrales más estrechos en la condición lenta. Sin embargo, existe variabilidad considerable en la magnitud de este ajuste. Los participantes 5 y 16 muestran los ajustes más extremos (efectos cercanos a -2), mientras que otros como el participante 24 muestran ajustes mínimos.
+
+Patrones similares emergen para Go/No-Go (panel B), aunque con algunas diferencias notables. Varios participantes (12, 5, 25) muestran ajustes positivos, adoptando umbrales más conservadores en la condición lenta. Esta heterogeneidad en las estrategias sugiere que los participantes responden de manera idiosincrática a la manipulación de velocidad, posiblemente reflejando diferentes interpretaciones de las instrucciones o diferentes estrategias de optimización del rendimiento.
+
+## Análisis de Correlación Entre Tareas
+
+El análisis central para evaluar la hipótesis sobre mecanismos compartidos de control reactivo examina la correlación entre las eficiencias de procesamiento en ambas tareas. La Figura 13 presenta el diagrama de dispersión de las eficiencias individuales, donde cada punto representa un participante.
+
+### Construcción de los Índices de Eficiencia
+
+Los índices de eficiencia se construyeron según la metodología descrita, transformando los efectos estimados del DDM en medidas positivas donde valores más altos indican mejor control cognitivo. Para Flanker, la eficiencia refleja la capacidad de mantener procesamiento de alta calidad ante conflicto. Para Go/No-Go, representa la capacidad de generar evidencia hacia la inhibición cuando se requiere. Estos índices proporcionan medidas comparables de control reactivo que pueden correlacionarse significativamente entre tareas.
+
+### Resultados del Modelo de Correlación
+
+La Tabla 3 presenta los resultados del modelo de regresión bayesiana que examina la relación entre eficiencias. El intercepto del modelo fue 1.479 (SE = 1.035, IC 95%: -0.625 - 3.454), representando el nivel esperado de eficiencia Go/No-Go cuando la eficiencia Flanker es cero. El coeficiente crítico que prueba la hipótesis principal fue -0.468 (SE = 0.878, IC 95%: -2.176 - 1.290).
+
+Contrario a la predicción de la hipótesis, este coeficiente no solo no es significativamente positivo, sino que muestra una tendencia negativa. El amplio intervalo de credibilidad que incluye tanto valores positivos como negativos indica incertidumbre sustancial sobre la dirección y magnitud de cualquier relación. La probabilidad posterior de que el coeficiente sea positivo es aproximadamente 0.30, proporcionando evidencia en contra de la hipótesis de correlación positiva.
+
+La Figura 13 confirma estos resultados estadísticos. Los puntos están dispersos sin un patrón claro, y la línea de regresión muestra una pendiente ligeramente negativa con amplios intervalos de incertidumbre. Algunos participantes (como 7 y 12) muestran alta eficiencia en Flanker pero baja en Go/No-Go, mientras que otros (como 15) muestran el patrón opuesto. Esta falta de correspondencia sistemática sugiere que las capacidades medidas por cada tarea son largamente independientes.
+
+## Patrones Adicionales en los Datos
+
+Aunque la hipótesis principal no fue respaldada, los análisis revelaron varios patrones adicionales informativos sobre la naturaleza del control cognitivo. La Figura 14 presenta distribuciones agregadas de los parámetros individuales, permitiendo comparaciones visuales entre tareas.
+
+Los paneles superiores muestran que las distribuciones de los efectos de incongruencia (Flanker) y No-Go son claramente distinguibles, con el efecto No-Go mostrando mayor magnitud y variabilidad. Esto confirma que la inhibición completa de respuesta representa una demanda cognitiva cualitativamente diferente y más extrema que la resolución de conflicto. Las distribuciones de los efectos de velocidad son más comparables entre tareas, sugiriendo que los ajustes estratégicos en el criterio de decisión pueden operar similarmente entre dominios.
+
+La ausencia de correlación entre las eficiencias de las tareas, combinada con la clara diferenciación en las magnitudes de los efectos, sugiere que el control cognitivo reactivo no es un constructo unitario como propuso la hipótesis inicial. En cambio, los resultados son más consistentes con modelos que postulan mecanismos de control especializados para diferentes tipos de demandas cognitivas. La resolución de conflicto entre respuestas competidoras (Flanker) y la inhibición completa de respuestas (Go/No-Go) parecen depender de sistemas neurocognitivos separables, cada uno con sus propias fuentes de variabilidad individual.
+
+Estos hallazgos tienen implicaciones importantes para la comprensión del control ejecutivo. Sugieren que las intervenciones diseñadas para mejorar un aspecto del control cognitivo pueden no transferirse automáticamente a otros dominios, y que la evaluación comprehensiva del funcionamiento ejecutivo requiere múltiples medidas que capturen diferentes facetas del control. La especificidad de dominio observada también implica que los déficits de control cognitivo en poblaciones clínicas pueden manifestarse selectivamente en ciertos tipos de demandas mientras preservan otras capacidades.
+
+
+
+```{r}
+#| include: false
+set.seed(90)
+# =============================================================================
+# HIERARCHICAL BAYESIAN DDM ANALYSIS
+# Hypothesis: Reactive cognitive control as common factor between tasks
+# =============================================================================
+# Configure brms options
+options(brms.backend = "cmdstanr")
+options(mc.cores = parallel::detectCores() - 1)
+
+# =============================================================================
+# PART 1: DATA PREPARATION FOR HIERARCHICAL DDM
+# =============================================================================
+
+# Function to prepare Flanker data
+prepare_flanker_hierarchical <- function(data, condition_name) {
+  data %>%
+    mutate(
+      # Code response: 1 = upper (right), 0 = lower (left)
+      response = case_when(
+        arrow_pattern %in% c(">>>>>", ">><>>") & correct_response == "Correct" ~ 1,
+        arrow_pattern %in% c("<<<<<", "<<><<") & correct_response == "Correct" ~ 0,
+        arrow_pattern %in% c(">>>>>", ">><>>") & correct_response == "Incorrect" ~ 0,
+        arrow_pattern %in% c("<<<<<", "<<><<") & correct_response == "Incorrect" ~ 1,
+        TRUE ~ NA_real_
+      ),
+      # RT in seconds
+      rt = RT_ms / 1000,
+      # Congruency
+      congruency = ifelse(arrow_pattern %in% c(">>>>>", "<<<<<"), 
+                         "congruent", "incongruent"),
+      # Speed condition
+      speed_condition = condition_name,
+      # Participant ID as factor
+      participant = as.factor(Subject_num)
+    ) %>%
+    filter(
+      rt >= 0.15,
+      rt <= ifelse(condition_name == "fast", 2.0, 4.5)
+    ) %>%
+    select(participant, rt, response, congruency, speed_condition)
+}
+
+# Function to prepare Go/No-Go data
+prepare_gonogo_hierarchical <- function(data, condition_name) {
+  data %>%
+    mutate(
+      # For DDM: 1 = Go response, 0 = No-Go response
+      response = case_when(
+        !is.na(RT_ms) ~ 1,  # Any response is "Go"
+        is.na(RT_ms) ~ 0,   # No response is "No-Go"
+        TRUE ~ NA_real_
+      ),
+      # RT in seconds, for non-responses use time limit
+      rt = case_when(
+        !is.na(RT_ms) ~ RT_ms / 1000,
+        TRUE ~ ifelse(condition_name == "fast", 2.0, 4.5)
+      ),
+      # Stimulus type
+      stimulus_type = stimulus_type,
+      # Condition
+      speed_condition = condition_name,
+      # Participant ID
+      participant = as.factor(Subject_num)
+    ) %>%
+    filter(rt >= 0.15) %>%
+    select(participant, rt, response, stimulus_type, speed_condition)
+}
+
+# Prepare data
+flanker_fast_hier <- prepare_flanker_hierarchical(resp_ericsen_rapido_num, "fast")
+flanker_slow_hier <- prepare_flanker_hierarchical(resp_ericsen_lento_num, "slow")
+flanker_data <- bind_rows(flanker_fast_hier, flanker_slow_hier)
+
+gonogo_fast_hier <- prepare_gonogo_hierarchical(resp_gonogo_rapido_num, "fast")
+gonogo_slow_hier <- prepare_gonogo_hierarchical(resp_gonogo_lento_num, "slow")
+gonogo_data <- bind_rows(gonogo_fast_hier, gonogo_slow_hier)
+
+# =============================================================================
+# PART 2: HIERARCHICAL MODEL FOR FLANKER
+# =============================================================================
+
+# Flanker model formula
+flanker_formula <- bf(
+  rt | dec(response) ~ 1,
+  # Drift rate: congruency effect with participant variability
+  mu ~ congruency + (congruency | participant),
+  # Boundary separation: speed effect with participant variability  
+  bs ~ speed_condition + (speed_condition | participant),
+  # Non-decision time: constant per participant
+  ndt ~ 1 + (1 | participant),
+  # Bias: constant per participant
+  bias ~ 1 + (1 | participant)
+)
+
+# Informed priors for Flanker
+flanker_priors <- c(
+  # Drift rate (mu)
+  prior(normal(2, 1), class = Intercept, dpar = mu),
+  prior(normal(-1, 0.5), class = b, coef = congruencyincongruent, dpar = mu),
+  prior(cauchy(0, 0.5), class = sd, dpar = mu),
+  
+  # Boundary separation (bs)
+  prior(normal(1.5, 0.5), class = Intercept, dpar = bs),
+  prior(normal(-0.5, 0.25), class = b, coef = speed_conditionslow, dpar = bs),
+  prior(cauchy(0, 0.25), class = sd, dpar = bs),
+  
+  # Non-decision time (ndt)
+  prior(normal(-1, 0.5), class = Intercept, dpar = ndt),  # log scale
+  prior(cauchy(0, 0.25), class = sd, dpar = ndt),
+  
+  # Bias (z)
+  prior(normal(0, 0.5), class = Intercept, dpar = bias),  # logit scale
+  prior(cauchy(0, 0.25), class = sd, dpar = bias)
+)
+
+# Fit Flanker model
+flanker_model <- brm(
+  formula = flanker_formula,
+  
+  data = flanker_data,
+  family = wiener(),
+  prior = flanker_priors,
+  sample_prior = "only",
+  chains = 5,
+  iter = 8000,
+  warmup = 2000,
+  backend = "cmdstanr",
+  control = list(adapt_delta = 0.99),
+  save_pars = save_pars(all = TRUE),
+  seed = 42
+)
+
+# =============================================================================
+# PART 3: HIERARCHICAL MODEL FOR GO/NO-GO
+# =============================================================================
+
+gonogo_data <- gonogo_data %>%
+  mutate(
+    stimulus_type = fct_recode(stimulus_type,
+                               NoGo = "No-Go"),
+    stimulus_type = factor(stimulus_type, levels = c("Go", "NoGo")),
+    speed_condition = factor(speed_condition, levels = c("fast", "slow"))
+  )
+
+# Go/No-Go model formula
+gonogo_formula <- bf(
+  rt | dec(response) ~ 1,
+  # Drift rate: varies with stimulus type
+  mu ~ stimulus_type + (stimulus_type | participant),
+  # Boundary separation: varies with speed
+  bs ~ speed_condition + (speed_condition | participant),
+  # Non-decision time
+  ndt ~ 1 + (1 | participant),
+  # Bias: towards Go (high value)
+  bias ~ 1 + (1 | participant)
+)
+
+# Priors for Go/No-Go
+gonogo_priors <- c(
+  # Drift rate
+  prior(normal(1.5, 1), class = Intercept, dpar = mu),  
+  prior(normal(-3, 1), class = b, coef = stimulus_typeNoGo, dpar = mu),
+  prior(cauchy(0, 0.5), class = sd, dpar = mu),
+
+  # Boundary separation
+  prior(normal(1.5, 0.5), class = Intercept, dpar = bs),
+  prior(normal(-0.5, 0.25), class = b, coef = speed_conditionslow, dpar = bs),
+  prior(cauchy(0, 0.25), class = sd, dpar = bs),
+
+  # Non-decision time
+  prior(normal(-1, 0.5), class = Intercept, dpar = ndt),
+  prior(cauchy(0, 0.25), class = sd, dpar = ndt),
+
+  # Bias
+  prior(normal(0.5, 0.5), class = Intercept, dpar = bias),
+  prior(cauchy(0, 0.25), class = sd, dpar = bias)
+)
+
+# Fit Go/No-Go model
+gonogo_model <- brm(
+  gonogo_formula,
+  sample_prior = "only",
+  data = gonogo_data,
+  family = wiener(),
+  prior = gonogo_priors,
+  chains = 5,
+  iter = 8000,
+  warmup = 2000,
+  control = list(adapt_delta = 0.99),
+  save_pars = save_pars(all = TRUE),
+  seed = 42
+)
+
+# =============================================================================
+# PART 4: EXTRACT INDIVIDUAL PARAMETERS
+# =============================================================================
+
+extract_individual_params <- function(model) {
+  individual_coefs <- coef(model)$participant
+  
+  purrr::map_dfr(dimnames(individual_coefs)[[3]], function(param) {
+    individual_coefs[,,param] %>%
+      as_tibble(rownames = "participant") %>%
+      mutate(parameter = param)
+  }) %>%
+  rename(
+    estimate = Estimate,
+    est_error = `Est.Error`,
+    q2.5 = `Q2.5`,
+    q97.5 = `Q97.5`
+  ) %>%
+  select(participant, parameter, everything())
+}
+
+# Extract parameters
+flanker_ind_params <- extract_individual_params(flanker_model)
+gonogo_ind_params <- extract_individual_params(gonogo_model)
+
+# =============================================================================
+# PART 5: CORRELATION ANALYSIS
+# =============================================================================
+
+# Calculate efficiency for Flanker
+flanker_efficiency <- flanker_ind_params %>%
+  filter(parameter == "congruencyincongruent") %>%
+  select(participant, estimate) %>%
+  mutate(flanker_efficiency = -estimate) %>%
+  select(participant, flanker_efficiency)
+
+# Calculate efficiency for Go/No-Go
+gonogo_efficiency <- gonogo_ind_params %>%
+  filter(parameter %in% c("Intercept", "stimulus_typeNoGo")) %>%
+  select(participant, parameter, estimate) %>%
+  pivot_wider(names_from = parameter, values_from = estimate) %>%
+  mutate(gonogo_efficiency = -(Intercept + stimulus_typeNoGo)) %>%
+  select(participant, gonogo_efficiency)
+
+# Join efficiency data
+correlation_data <- inner_join(flanker_efficiency, gonogo_efficiency, by = "participant")
+
+# Correlation model
+correlation_model <- brm(
+  gonogo_efficiency ~ flanker_efficiency,
+  data = correlation_data,
+  prior = c(
+    prior(normal(0, 1), class = Intercept),
+    prior(normal(0, 1), class = b)
+  ),
+  chains = 4,
+  iter = 4000,
+  seed = 42,
+  backend = "cmdstanr"
+)
+```
+
+
+```{r}
+# =============================================================================
+# PART 6: TABLES
+# =============================================================================
+
+# Table 1: Flanker Model Fixed Effects
+flanker_fixed <- fixef(flanker_model) %>%
+  as.data.frame() %>%
+  rownames_to_column("Parameter") %>%
+  mutate(
+    Parameter = case_when(
+      Parameter == "mu_Intercept" ~ "Drift Rate: Intercept (Congruent)",
+      Parameter == "mu_congruencyincongruent" ~ "Drift Rate: Incongruent Effect",
+      Parameter == "bs_Intercept" ~ "Boundary: Intercept (Fast)",
+      Parameter == "bs_speed_conditionslow" ~ "Boundary: Slow Effect",
+      Parameter == "ndt_Intercept" ~ "Non-decision Time",
+      Parameter == "bias_Intercept" ~ "Response Bias",
+      TRUE ~ Parameter
+    )
+  )
+
+kable(flanker_fixed, 
+      format = "latex",
+      booktabs = TRUE,
+      digits = 3,
+      caption = "Fixed Effects - Flanker Task DDM",
+      col.names = c("Parameter", "Estimate", "SE", "2.5", "97.5")) %>%
+  kable_styling(latex_options = c("HOLD_position"))
+
+# Table 2: Go/No-Go Model Fixed Effects
+gonogo_fixed <- fixef(gonogo_model) %>%
+  as.data.frame() %>%
+  rownames_to_column("Parameter") %>%
+  mutate(
+    Parameter = case_when(
+      Parameter == "mu_Intercept" ~ "Drift Rate: Intercept (Go)",
+      Parameter == "mu_stimulus_typeNoGo" ~ "Drift Rate: No-Go Effect",
+      Parameter == "bs_Intercept" ~ "Boundary: Intercept (Fast)",
+      Parameter == "bs_speed_conditionslow" ~ "Boundary: Slow Effect",
+      Parameter == "ndt_Intercept" ~ "Non-decision Time",
+      Parameter == "bias_Intercept" ~ "Response Bias",
+      TRUE ~ Parameter
+    )
+  )
+
+kable(gonogo_fixed, 
+      format = "latex",
+      booktabs = TRUE,
+      digits = 3,
+      caption = "Fixed Effects - Go/No-Go Task DDM",
+      col.names = c("Parameter", "Estimate", "SE", "2.5", "97.5")) %>%
+  kable_styling(latex_options = c("HOLD_position"))
+
+# Table 3: Correlation Model
+correlation_fixed <- fixef(correlation_model) %>%
+  as.data.frame() %>%
+  rownames_to_column("Parameter") %>%
+  mutate(
+    Parameter = case_when(
+      Parameter == "Intercept" ~ "Intercept",
+      Parameter == "flanker_efficiency" ~ "Flanker Efficiency Effect",
+      TRUE ~ Parameter
+    )
+  )
+
+kable(correlation_fixed, 
+      format = "latex",
+      booktabs = TRUE,
+      digits = 3,
+      caption = "Correlation Between Task Efficiencies",
+      col.names = c("Parameter", "Estimate", "SE", "2.5", "97.5")) %>%
+  kable_styling(latex_options = c("HOLD_position"))
+```
+
+```{r}
+#| label: posterior-distributions
+#| fig-cap: "Posterior distributions of population-level effects for Flanker and Go/No-Go tasks. Red dashed lines indicate zero effect."
+#| fig-width: 8
+#| fig-height: 6
+
+# =============================================================================
+# POSTERIOR DISTRIBUTIONS
+# =============================================================================
+
+# Extract fixed effects for Flanker
+flanker_fixed_draws <- as_draws_df(flanker_model) %>%
+  select(b_congruencyincongruent, b_bs_speed_conditionslow) %>%
+  pivot_longer(everything(), names_to = "parameter", values_to = "value") %>%
+  mutate(parameter = case_when(
+    parameter == "b_congruencyincongruent" ~ "Incongruency Effect (Drift Rate)",
+    parameter == "b_bs_speed_conditionslow" ~ "Speed Effect (Boundary)",
+    TRUE ~ parameter
+  ))
+
+p_flanker_posterior <- ggplot(flanker_fixed_draws, aes(x = value, y = parameter)) +
+  stat_halfeye(fill = "steelblue", alpha = 0.8) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  labs(title = "Flanker Task",
+       x = "Parameter Value",
+       y = "") +
+  theme_minimal()
+
+# Extract fixed effects for Go/No-Go
+gonogo_fixed_draws <- as_draws_df(gonogo_model) %>%
+  select(b_stimulus_typeNoGo, b_bs_speed_conditionslow) %>%
+  pivot_longer(everything(), names_to = "parameter", values_to = "value") %>%
+  mutate(parameter = case_when(
+    parameter == "b_stimulus_typeNoGo" ~ "No-Go Effect (Drift Rate)",
+    parameter == "b_bs_speed_conditionslow" ~ "Speed Effect (Boundary)",
+    TRUE ~ parameter
+  ))
+
+p_gonogo_posterior <- ggplot(gonogo_fixed_draws, aes(x = value, y = parameter)) +
+  stat_halfeye(fill = "darkgreen", alpha = 0.8) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  labs(title = "Go/No-Go Task",
+       x = "Parameter Value",
+       y = "") +
+  theme_minimal()
+
+# Combine posterior plots
+ggarrange(p_flanker_posterior, p_gonogo_posterior,
+          ncol = 1, nrow = 2,
+          labels = c("A", "B"))
+```
+
+```{r}
+#| label: individual-drift-effects
+#| fig-cap: "Individual participant effects on drift rate parameters. Points show posterior means with 95% credible intervals. Red dashed line indicates zero effect."
+#| fig-width: 10
+#| fig-height: 10
+
+# =============================================================================
+# INDIVIDUAL DRIFT RATE EFFECTS
+# =============================================================================
+
+flanker_participant_drift <- flanker_ind_params %>%
+  filter(parameter == "congruencyincongruent") %>%
+  ggplot(aes(x = reorder(participant, estimate), y = estimate)) +
+  geom_pointrange(aes(ymin = q2.5, ymax = q97.5), 
+                  color = "steelblue", alpha = 0.8, size = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(x = "Participant", 
+       y = "Incongruency Effect",
+       title = "Flanker Task") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+
+gonogo_participant_drift <- gonogo_ind_params %>%
+  filter(parameter == "stimulus_typeNoGo") %>%
+  ggplot(aes(x = reorder(participant, estimate), y = estimate)) +
+  geom_pointrange(aes(ymin = q2.5, ymax = q97.5), 
+                  color = "darkgreen", alpha = 0.8, size = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(x = "Participant", 
+       y = "No-Go Effect",
+       title = "Go/No-Go Task") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+
+# Combine individual drift plots
+ggarrange(flanker_participant_drift, gonogo_participant_drift,
+          ncol = 2, nrow = 1,
+          labels = c("A", "B"))
+```
+
+```{r}
+#| label: correlation-analysis
+#| fig-cap: "Cross-task efficiency correlation. Each point represents a participant, with efficiency calculated as the negative of the conflict/inhibition effect on drift rate."
+#| fig-width: 8
+#| fig-height: 6
+
+# =============================================================================
+# CORRELATION ANALYSIS
+# =============================================================================
+
+p_correlation <- ggplot(correlation_data, aes(x = flanker_efficiency, y = gonogo_efficiency)) +
+  geom_smooth(method = "lm", color = "darkblue", fill = "lightblue", alpha = 0.3) +
+  geom_point(size = 3, alpha = 0.7, color = "darkblue") +
+  geom_text(aes(label = participant), vjust = -0.5, hjust = 0.5, size = 3, alpha = 0.6) +
+  labs(
+    title = "Cross-Task Efficiency Correlation",
+    subtitle = paste("N =", nrow(correlation_data), "participants"),
+    x = "Flanker Efficiency (-incongruency effect)",
+    y = "Go/No-Go Efficiency (-NoGo effect)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(size = 12)
+  )
+
+p_correlation
+```
+
+```{r}
+#| label: parameter-distributions
+#| fig-cap: "Distribution of individual parameter estimates across tasks, showing the variability in conflict/inhibition effects and speed-accuracy trade-offs."
+#| fig-width: 10
+#| fig-height: 8
+
+# =============================================================================
+# PARAMETER DISTRIBUTIONS AND SUMMARY
+# =============================================================================
+
+# Prepare parameter distributions
+param_distributions <- bind_rows(
+  flanker_ind_params %>%
+    filter(parameter %in% c("congruencyincongruent", "bs_speed_conditionslow")) %>%
+    mutate(task = "Flanker"),
+  gonogo_ind_params %>%
+    filter(parameter %in% c("stimulus_typeNoGo", "bs_speed_conditionslow")) %>%
+    mutate(task = "Go/No-Go")
+) %>%
+  mutate(
+    parameter_clean = case_when(
+      parameter == "congruencyincongruent" ~ "Incongruency Effect",
+      parameter == "stimulus_typeNoGo" ~ "No-Go Effect",
+      parameter == "bs_speed_conditionslow" ~ "Speed Effect",
+      TRUE ~ parameter
+    )
+  )
+
+# Distribution plot
+p_param_distributions <- param_distributions %>%
+  ggplot(aes(x = estimate, fill = task)) +
+  geom_density(alpha = 0.6) +
+  facet_wrap(~parameter_clean, scales = "free", ncol = 3) +
+  scale_fill_viridis_d() +
+  labs(x = "Parameter Estimate",
+       y = "Density") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# Summary plot
+param_summary <- param_distributions %>%
+  group_by(task, parameter_clean) %>%
+  summarise(
+    mean = mean(estimate),
+    sd = sd(estimate),
+    .groups = "drop"
+  )
+
+p_param_summary <- param_summary %>%
+  ggplot(aes(x = parameter_clean, y = mean, color = task)) +
+  geom_point(size = 4, position = position_dodge(0.3)) +
+  geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd), 
+                width = 0.2, position = position_dodge(0.3)) +
+  scale_color_viridis_d() +
+  labs(x = "",
+       y = "Mean ± SD") +
+  theme_minimal() +
+  coord_flip() +
+  theme(legend.position = "bottom")
+
+# Combine distribution plots
+ggarrange(p_param_distributions, p_param_summary,
+          ncol = 1, nrow = 2,
+          heights = c(2, 1),
+          labels = c("A", "B"))
+```
+
+```{r}
+#| label: speed-accuracy-tradeoff
+#| fig-cap: "Individual differences in speed-accuracy trade-off across tasks. Negative values indicate stronger caution in the slow condition."
+#| fig-width: 10
+#| fig-height: 10
+
+# =============================================================================
+# SPEED-ACCURACY TRADE-OFF
+# =============================================================================
+
+flanker_participant_boundary <- flanker_ind_params %>%
+  filter(parameter == "bs_speed_conditionslow") %>%
+  ggplot(aes(x = reorder(participant, estimate), y = estimate)) +
+  geom_pointrange(aes(ymin = q2.5, ymax = q97.5), 
+                  color = "steelblue", alpha = 0.8, size = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(x = "Participant", 
+       y = "Speed Effect on Boundary",
+       title = "Flanker Task") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+
+gonogo_participant_boundary <- gonogo_ind_params %>%
+  filter(parameter == "bs_speed_conditionslow") %>%
+  ggplot(aes(x = reorder(participant, estimate), y = estimate)) +
+  geom_pointrange(aes(ymin = q2.5, ymax = q97.5), 
+                  color = "darkgreen", alpha = 0.8, size = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(x = "Participant", 
+       y = "Speed Effect on Boundary",
+       title = "Go/No-Go Task") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))
+
+# Combine boundary plots
+ggarrange(flanker_participant_boundary, gonogo_participant_boundary,
+          ncol = 2, nrow = 1,
+          labels = c("A", "B"))
+```
+
+# Conclusiones
+
+Los resultados del modelado computacional proporcionan una caracterizaciónde los procesos cognitivos subyacentes al control reactivo en ambos paradigmas experimentales. La aplicación del DDM jerárquico permitió descomponer el rendimiento conductual en componentes teóricamente significativos, revelando tanto patrones poblacionales robustos como variabilidad individual sustancial. Sin embargo, la ausencia de correlación entre las medidas de eficiencia en las dos tareas contradice la hipótesis inicial de un mecanismo unificado de control reactivo.
+
+La magnitud diferencial de los efectos observados merece consideración especial. El efecto de incongruencia en Flanker (aproximadamente -1 unidad en tasa de deriva) es sustancialmente menor que el efecto No-Go (aproximadamente -3 unidades), sugiriendo que estos paradigmas involucran demandas cognitivas de diferente escala. Mientras que la resolución de conflicto en Flanker requiere modular la acumulación de evidencia manteniendo el proceso general hacia adelante, la inhibición en Go/No-Go requiere revertir completamente una tendencia de respuesta establecida. Esta diferencia cualitativa puede explicar por qué las eficiencias en estas tareas no correlacionan: representan capacidades fundamentalmente distintas más que variaciones en un tema común.
+
+Por último la adopción de criterios menos conservadores en las condiciones lentas, reflejada en umbrales más estrechos y mayores tasas de error, sugiere que el control óptimo puede requerir cierto nivel de presión temporal o urgencia. Cuando esta presión se relaja, los participantes pueden experimentar dificultades para mantener el foco atencional o pueden adoptar estrategias subóptimas, resultando en peor rendimiento. Este hallazgo tiene implicaciones prácticas para el diseño de ambientes que requieren control cognitivo sostenido.
+
+# Hipótesis Neuronal
+
+La investigación de los correlatos neuronales del control cognitivo ha identificado consistentemente componentes específicos de los potenciales relacionados con eventos (PREs) que reflejan diferentes aspectos del procesamiento ejecutivo [@ankur_gupta_0e8f2b95]. Basándose en la literatura y en los resultados conductuales obtenidos, se puede formular una hipótesis neuronal específica que vincule los parámetros del DDM con marcadores electrofisiológicos observables .
+
+## Correlatos Neuronales del Monitoreo de Conflictos y la Inhibición
+
+El componente N2 constituye uno de los marcadores neuronales más estudiados del procesamiento de conflicto. Este componente se manifiesta como una deflexión negativa en el EEG que alcanza su amplitud máxima aproximadamente 200-350 ms después de la presentación del estímulo, con distribución topográfica fronto-central [@madeleine_j__groom_3415ea52; @george_a__mashour_bd37ef84]. Décadas de investigación han establecido que la amplitud del N2 aumenta sistemáticamente en condiciones que requieren mayor control cognitivo: es más negativa para estímulos incongruentes que congruentes en tareas tipo Flanker, y más negativa para ensayos No-Go que Go en tareas de inhibición [@madeleine_j__groom_3415ea52; @liufang_xie_686876d3; @weixi_kang_4494e1c3].
+
+La fuente neural primaria del N2 relacionado con conflicto se ha localizado consistentemente en la corteza cingulada anterior dorsal (dACC), una región crítica para el monitoreo de conflicto y la señalización de la necesidad de control. La actividad de la dACC, reflejada en el N2, se interpreta como una señal de alarma que detecta la competencia entre tendencias de respuesta y recluta recursos de control adicionales. Esta interpretación funcional se alinea conceptualmente con el parámetro de tasa de deriva del DDM: ambos reflejan la calidad del procesamiento de información bajo condiciones de conflicto [@lara_todorova_23fa54ae].
+
+El componente P3, particularmente la subcomponente P3b, representa un proceso cognitivo posterior y más elaborado. Este componente positivo alcanza su máximo típicamente entre 300-600 ms post-estímulo, con amplitud máxima en regiones centro-parietales. Funcionalmente, el P3 se ha asociado con la actualización del contexto, la consolidación de decisiones y la asignación de recursos atencionales. En el contexto de tareas de control cognitivo, la amplitud del P3 refleja la cantidad de recursos de procesamiento dedicados a evaluar y responder al estímulo después de que el conflicto inicial ha sido detectado [@madeleine_j__groom_3415ea52; @liufang_xie_686876d3; @weixi_kang_4494e1c3].
+
+La relación entre el P3 y los procesos de decisión es particularmente relevante para el presente marco teórico. Estudios previos han mostrado que la latencia del P3 correlaciona con el tiempo de decisión, mientras que su amplitud refleja la confianza o certeza en la decisión tomada [@muwang_ye_03a4369d]. Estas propiedades sugieren una correspondencia potencial con el parámetro de separación de umbrales del DDM, que representa el nivel de evidencia requerido antes de comprometerse con una respuesta [@douglas_g__lee_6b4b8551].
+
+## Vinculación de los Parámetros del DDM con la Actividad Neuronal
+
+La correspondencia teórica entre los parámetros del modelo computacional y los componentes neuronales permite formular predicciones específicas sobre sus relaciones. Esta vinculación no es meramente correlacional sino que refleja hipótesis sobre los procesos neurales que implementan las computaciones capturadas por el DDM [@braden_a__purcell_15ddaacd;@ankur_gupta_0e8f2b95].
+
+### Tasa de Deriva y N2
+
+El parámetro de tasa de deriva cuantifica la eficiencia con la que se acumula evidencia hacia la decisión correcta. En presencia de conflicto (ensayos incongruentes o No-Go), esta eficiencia se reduce, reflejada en valores más bajos de deriva. El componente N2, aumentado en estas mismas condiciones, señala la detección neural del conflicto. Se propone que estos dos índices están funcionalmente relacionados: el N2 refleja el proceso neural que resulta en la reducción de la tasa de deriva observada conductualmente [@patrycja_ka_ama_a_f916330f].
+
+Esta relación puede conceptualizarse de dos maneras complementarias. Primero, un N2 de mayor amplitud podría reflejar mayor conflicto detectado, lo que resulta en mayor interferencia y por tanto menor tasa de deriva. Alternativamente, el N2 podría indexar el reclutamiento de control que mitiga parcialmente el conflicto, con amplitudes mayores asociadas a control más efectivo y por tanto mejor mantenimiento de la tasa de deriva [@sarah_f_rster_4d163f7e]. La dirección específica de esta relación es una pregunta empírica, pero la existencia de una asociación sistemática es una predicción fuerte.
+
+### Separación de Umbrales y P3
+
+El parámetro de separación de umbrales representa una decisión estratégica sobre cuánta evidencia acumular antes de responder. Esta decisión requiere mantener y evaluar información a lo largo del tiempo, procesos asociados con el sistema atencional posterior indexado por el P3. Se hipotetiza que participantes que adoptan umbrales más conservadores (mayor separación) necesitan mantener la atención y evaluar la evidencia durante períodos más largos, resultando en amplitudes P3 mayores [@domeneghini_didone_dayane_02802585].
+
+Esta predicción se basa en la conceptualización del P3 como reflejando la intensidad del procesamiento atencional. Umbrales más altos requieren no solo más tiempo sino también sostenimiento activo de la atención para monitorear la evidencia acumulada. El P3, con sus generadores en la red fronto-parietal de atención, proporciona un índice neural de este procesamiento sostenido [@domeneghini_didone_dayane_02802585].
+
+## Formulación de la Hipótesis Neuronal
+
+Integrando las consideraciones anteriores, se formula la siguiente hipótesis neuronal específica:
+
+**Hipótesis de Doble Disociación Neurocomputacional**: Los correlatos neuronales del procesamiento de conflicto (N2) y la evaluación estratégica (P3) mostrarán asociaciones específicas y disociables con los parámetros computacionales de eficiencia de acumulación (tasa de deriva) y criterio de decisión (separación de umbrales), respectivamente.
+
+Específicamente, se predice:
+
+- $H1$ **Asociación N2-Deriva**: La magnitud del efecto de conflicto en el componente N2 (diferencia en amplitud entre condiciones de alto y bajo conflicto) correlacionará significativamente con el efecto de conflicto en la tasa de deriva del DDM. Participantes que muestran mayores efectos N2 mostrarán cambios correspondientes en sus parámetros de deriva, reflejando la relación funcional entre detección neural de conflicto y eficiencia de procesamiento.
+
+- $H2$ **Asociación P3-Umbral**: La amplitud del componente P3 correlacionará positivamente con el parámetro de separación de umbrales. Participantes que adoptan criterios más conservadores mostrarán amplitudes P3 mayores, reflejando mayor inversión de recursos atencionales en la evaluación de evidencia.
+
+- $H3$ **Especificidad de las Asociaciones**: Críticamente, no se esperan correlaciones cruzadas significativas. El efecto N2 no debería correlacionar con la separación de umbrales, ni la amplitud P3 con los efectos de deriva. Esta doble disociación proporcionaría evidencia fuerte de que los componentes neurales y computacionales capturan procesos distintos y separables.
+
+Esta hipótesis es particularmente poderosa porque va más allá de buscar simples correlaciones cerebro-conducta. En cambio, propone un mapeo específico entre arquitectura computacional (capturada por el DDM) y implementación neural (medida por PREs), proporcionando un puente entre niveles de análisis que es central para la neurociencia cognitiva computacional.
+
+# Diseño Experimental para Poner a Prueba la Hipótesis Neuronal
+
+La evaluación empírica de la hipótesis neuronal requiere un experimento cuidadosamente diseñado que integre registro electrofisiológico de alta calidad con los paradigmas conductuales ya validados. Este diseño debe optimizar tanto la calidad de los datos neurales como la posibilidad de aplicar el modelado computacional desarrollado.
+
+## Objetivo
+
+El experimento propuesto tiene como objetivo principal establecer las relaciones predichas entre los parámetros del DDM y los componentes de los PREs. Más allá de simplemente correlacionar medidas neurales y conductuales, el estudio busca validar un modelo neurocomputacional integrado del control cognitivo. Los objetivos específicos incluyen:
+
+Primero, replicar los patrones conductuales y computacionales observados en el presente estudio, asegurando la generalización de los hallazgos a una nueva muestra. Segundo, obtener registros de EEG de alta densidad durante la realización de las tareas, permitiendo la cuantificación precisa de los componentes N2 y P3. Tercero, examinar las asociaciones predichas entre parámetros del modelo y amplitudes de PREs, probando la hipótesis de doble disociación. Finalmente, explorar la especificidad temporal y espacial de estas relaciones mediante análisis complementarios.
+
+## Participantes y Metodología
+
+### Muestra
+
+Se reclutarán entre 35-40 participantes, balanceados por género. Este tamaño muestral se basa en análisis de poder que consideran las correlaciones típicas observadas en estudios neurocomputacionales previos ($r = 0.4-0.6$) y proporciona poder adecuado ($1-\beta \geq 0.80$) para detectar efectos medianos a grandes [@enhui_xie_87b036cd; @marcel_binz_abd2cfe9]. Los criterios de inclusión especificarán visión normal o corregida, ausencia de trastornos neurológicos o psiquiátricos, y no uso de medicación psicoactivas entre otros. Todos los participantes proporcionarán consentimiento informado y recibirán compensación por su participación.
+
+### Sistema de Registro EEG
+
+Se empleará un sistema de EEG de alta densidad con 64 electrodos activos, permitiendo cobertura completa del cuero cabelludo y mejorando las posibilidades de análisis de fuente. Los electrodos se posicionarán según el sistema internacional 10-20 extendido, con electrodos adicionales para monitorear movimientos oculares (EOG) y actividad muscular facial (EMG). La impedancia de los electrodos se mantendrá por debajo de 5 kΩ para electrodos activos [@erik_k__st__louis_58a74615].
+
+El registro se realizará a una tasa de muestreo mínima de 512 Hz (preferiblemente 1000 Hz) con referencias en los mastoides y tierra en la frente. Los amplificadores tendrán un rango dinámico suficiente para evitar saturación y filtros analógicos apropiados (DC-100 Hz) para capturar toda la actividad relevante sin distorsión [@paulo_barraza_e9d389c9].
+
+## Procedimiento
+
+### Preparación
+
+Los participantes llegarán al laboratorio y completarán formularios de consentimiento y cuestionarios demográficos. La preparación del EEG seguirá protocolos estandarizados, incluyendo medición de la circunferencia craneal, marcación de posiciones de electrodos, y aplicación del gorro de electrodos con gel conductor. Se dedicará tiempo suficiente para lograr impedancias óptimas en todos los canales.
+
+### Diseño Experimental
+
+El diseño replicará exactamente los paradigmas conductuales del estudio actual. Los participantes completarán tanto la tarea Flanker como la Go/No-Go, cada una con bloques rápidos y lentos. El orden de las tareas se contrabalanceará entre participantes, así como el orden de las condiciones de velocidad dentro de cada tarea. Cada bloque incluirá pausas breves para minimizar fatiga y permitir verificación de la calidad de la señal EEG.
+
+Las tareas se presentarán en una pantalla CRT o LCD de alta frecuencia de actualización (≥100 Hz) para minimizar la variabilidad temporal. Los estímulos tendrán el mismo tamaño y características que en el estudio original. Se enfatizará la importancia de minimizar movimientos oculares y parpadeos durante los períodos críticos de cada ensayo.
+
+### Sincronización y Marcadores
+
+Un aspecto crítico es la sincronización precisa entre eventos experimentales y el registro EEG. Se enviarán marcadores digitales únicos para cada tipo de evento (inicio del estímulo, tipo de ensayo, respuesta, etc.) con precisión de milisegundos. Estos marcadores permitirán la segmentación precisa de los datos para análisis de PREs.
+
+## Plan de Análisis de Datos
+
+### Preprocesamiento de Datos EEG
+
+El preprocesamiento seguirá las mejores prácticas actuales para maximizar la calidad de la señal mientras se preserva la actividad neural de interés. Los pasos incluirán:
+
+Filtrado digital paso-banda (0.1-30 Hz) para eliminar drift lento y ruido de alta frecuencia mientras se preservan los componentes N2 y P3. Segmentación en épocas de -200 a 800 ms relativo al inicio del estímulo, permitiendo capturar toda la actividad relevante. Corrección de línea base usando el período pre-estímulo (-200 a 0 ms). Detección y rechazo de artefactos mediante inspección visual y algoritmos automáticos, con umbrales adaptativos basados en la distribución de amplitudes de cada participante.
+
+Para artefactos oculares sistemáticos, se aplicará Análisis de Componentes Independientes (ICA) para identificar y remover componentes asociados con parpadeos y movimientos oculares, preservando la actividad neural. Se documentará el número de ensayos rechazados por condición para asegurar suficientes datos para promediar.
+
+### Cuantificación de Componentes
+
+**Componente N2**: Se identificará como la deflexión negativa máxima entre 200-350 ms post-estímulo en un clúster de electrodos fronto-centrales (Fz, FCz, Cz). El efecto de conflicto N2 se calculará como la diferencia en amplitud media entre condiciones de alto conflicto (incongruente/No-Go) y bajo conflicto (congruente/Go). Se aplicarán ventanas temporales adaptativas basadas en los picos individuales para acomodar variabilidad en la latencia.
+
+**Componente P3**: Se cuantificará como la deflexión positiva máxima entre 300-600 ms en electrodos centro-parietales (Pz, CPz). La amplitud se medirá como el voltaje medio en una ventana de ±50 ms alrededor del pico individual. Para capturar diferencias en el procesamiento estratégico, se promediará across todas las condiciones pero se examinará separadamente por condición de velocidad.
+
+### Modelado Computacional
+
+Los datos conductuales del experimento EEG se someterán al mismo proceso de modelado DDM jerárquico descrito anteriormente. Esto proporcionará estimaciones de parámetros individuales específicas para la muestra del estudio EEG, asegurando que las correlaciones cerebro-conducta se basen en datos concurrentes.
+
+### Análisis de Correlación Neurocomputacional
+
+El análisis principal examinará las correlaciones entre los parámetros del DDM y las amplitudes de los PREs usando métodos bayesianos que proporcionen estimaciones de incertidumbre. Se construirán modelos de regresión múltiple que examinen simultáneamente todas las relaciones predichas, permitiendo evaluar la especificidad de las asociaciones.
+
+Para probar la doble disociación, se compararán modelos que incluyan solo las asociaciones predichas (N2-deriva, P3-umbral) contra modelos que incluyan también las asociaciones cruzadas.
+
+## Consideraciones Éticas y Prácticas
+
+El protocolo experimental será revisado y aprobado por el comité de ética institucional correspondiente. Se asegurará que todos los procedimientos cumplan con las directrices para investigación con humanos. Los datos se anonimizarán y almacenarán de manera segura, con acceso limitado al equipo de investigación.
