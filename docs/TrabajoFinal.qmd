@@ -107,12 +107,14 @@ packages <- c(
   "ggpubr",        # Publication-ready plots"
   "ggdist",
   "RWiener",
-  
+  "qrcode",
   # Additional packages for DDM analysis
   "brms",           # Bayesian models
   "rtdists",        # DDM functions
   "bayesplot",      # Bayesian visualization
-  "posterior"       # Posterior handling
+  "posterior"      # Posterior handling
+  
+  
 )
 
 # Install and load all packages
@@ -312,7 +314,7 @@ La ejecución del control cognitivo no es monolítica; puede desplegarse en al m
 
 ## La Tarea Flanker de Eriksen: Un Paradigma para la Resolución de Conflictos
 
-La Tarea Flanker de Eriksen representa uno de los paradigmas experimentales más consolidados en el estudio del control cognitivo, específicamente en la investigación de los mecanismos de resolución de conflictos. En esta tarea, los participantes enfrentan el desafío de identificar la dirección de una flecha central mientras simultáneamente deben suprimir la información irrelevante proporcionada por flechas flanqueadoras. La elegancia de este paradigma radica en su capacidad para generar conflicto cognitivo de manera controlada y medible, permitiendo así el estudio sistemático de los procesos de control inhibitorio y atencional.
+La Tarea Flanker de Eriksen representa uno de los paradigmas experimentales más consolidados en el estudio del control cognitivo, específicamente en la investigación de los mecanismos de resolución de conflictos @[a_f__sanders_5dafdca1]. En esta tarea, los participantes enfrentan el desafío de identificar la dirección de una flecha central mientras simultáneamente deben suprimir la información irrelevante proporcionada por flechas flanqueadoras. La elegancia de este paradigma radica en su capacidad para generar conflicto cognitivo de manera controlada y medible, permitiendo así el estudio sistemático de los procesos de control inhibitorio y atencional [@].
 
 En la implementación actual del experimento, se emplearon cuatro configuraciones de estímulos que varían sistemáticamente en su nivel de conflicto. Los estímulos congruentes, representados por las configuraciones $>>>>>$ y $<<<<<$, presentan flancos que apuntan en la misma dirección que el objetivo central, facilitando así el procesamiento y la respuesta. En contraste, los estímulos incongruentes, manifestados en las configuraciones $>><>>$ y $<<><<$, introducen información conflictiva al presentar flancos que apuntan en dirección opuesta al objetivo, generando así la necesidad de un control cognitivo aumentado para resolver el conflicto y producir la respuesta correcta. Esta manipulación experimental se cruza factorialmente con una manipulación de velocidad de respuesta, resultando en un diseño 2×2 que permite examinar cómo la presión temporal modula los procesos de resolución de conflictos.
 
@@ -952,13 +954,13 @@ ggarrange(fast_correct, fast_incorrect,
 
 ## La Tarea Go/No-Go: Un Paradigma para la Inhibición de la Respuesta
 
-La tarea Go/No-Go representa un paradigma experimental clásico para el estudio de la inhibición de respuesta, un componente fundamental del control ejecutivo \cite{Donders1969}. En contraste con la tarea Flanker que evalúa la resolución de conflictos entre respuestas competidoras, la tarea Go/No-Go examina la capacidad de suprimir completamente una respuesta motora cuando las demandas contextuales así lo requieren \cite{Verbruggen2019}. La estructura de esta tarea genera una tendencia de respuesta dominante mediante la presentación frecuente de estímulos "Go" que requieren una respuesta rápida, intercalados con estímulos "No-Go" infrecuentes que demandan la inhibición de esta respuesta automatizada.
+La tarea Go/No-Go representa un paradigma experimental clásico para el estudio de la inhibición de respuesta, un componente fundamental del control ejecutivo @[Donders1969]. En contraste con la tarea Flanker que evalúa la resolución de conflictos entre respuestas competidoras, la tarea Go/No-Go examina la capacidad de suprimir completamente una respuesta motora cuando las demandas contextuales así lo requieren. La estructura de esta tarea genera una tendencia de respuesta dominante mediante la presentación frecuente de estímulos "Go" que requieren una respuesta rápida, intercalados con estímulos "No-Go" infrecuentes que demandan la inhibición de esta respuesta automatizada.
 
-En la implementación actual del experimento, se empleó una proporción típica de 80% ensayos Go y 20% ensayos No-Go, diseñada para establecer una fuerte impulsividad de respuesta que hace que la inhibición en los ensayos No-Go sea cognitivamente demandante \cite{Wessel2018}. Esta proporción asimétrica es crítica para el paradigma, ya que una distribución más equilibrada reduciría la velocidada de la respuesta y, consecuentemente, la demanda de control inhibitorio. Al igual que en la tarea Flanker, se implementó una manipulación factorial de la velocidad de respuesta, con condiciones rápida y lenta, permitiendo examinar cómo la presión temporal afecta los procesos inhibitorios.
+En la implementación actual del experimento, se empleó una proporción típica de 80% ensayos Go y 20% ensayos No-Go, diseñada para establecer una fuerte impulsividad de respuesta que hace que la inhibición en los ensayos No-Go sea cognitivamente demandante. Esta proporción asimétrica es crítica para el paradigma, ya que una distribución más equilibrada reduciría la velocidada de la respuesta y, consecuentemente, la demanda de control inhibitorio. Al igual que en la tarea Flanker, se implementó una manipulación factorial de la velocidad de respuesta, con condiciones rápida y lenta, permitiendo examinar cómo la presión temporal afecta los procesos inhibitorios.
 
 La Figura 6 presenta la distribución fundamental de respuestas correctas e incorrectas para los estímulos Go y No-Go en ambas condiciones de velocidad. En la condición rápida (Figura 6A), los datos revelan un patrón de rendimiento característico del paradigma. Los ensayos Go muestran una precisión extremadamente alta del 97.5% (5,623 respuestas correctas de 5,768 ensayos), confirmando el establecimiento exitoso de la respuesta. Esta alta tasa de aciertos en los ensayos Go contrasta marcadamente con el rendimiento en los ensayos No-Go, donde se observa una tasa de falsas alarmas del 17.9% (252 errores de 1,406 ensayos), equivalente a una precisión del 82.1% en la inhibición de respuesta.
 
-La condición lenta (Figura 6B) presenta un patrón inesperado que merece análisis detallado. Mientras que la precisión en los ensayos Go disminuye ligeramente al 93.5% (5,216 correctas de 5,578 ensayos), la tasa de falsas alarmas en los ensayos No-Go aumenta considerablemente al 29.9% (409 errores de 1,369 ensayos). Este incremento en las falsas alarmas bajo condiciones de menor presión temporal parece contraintuitivo, ya que cabría esperar que el tiempo adicional facilitara la inhibición exitosa. Sin embargo, este fenómeno ha sido documentado en la literatura y puede atribuirse a varios factores interrelacionados \cite{Littman2017}.
+La condición lenta (Figura 6B) presenta un patrón inesperado que merece análisis detallado. Mientras que la precisión en los ensayos Go disminuye ligeramente al 93.5% (5,216 correctas de 5,578 ensayos), la tasa de falsas alarmas en los ensayos No-Go aumenta considerablemente al 29.9% (409 errores de 1,369 ensayos). Este incremento en las falsas alarmas bajo condiciones de menor presión temporal parece contraintuitivo, ya que cabría esperar que el tiempo adicional facilitara la inhibición exitosa.
 
 El análisis temporal presentado en la Figura 7 proporciona información valiosa sobre la dinámica del control inhibitorio a lo largo del experimento. Los paneles superiores (Figuras 7A-B) muestran la distribución de respuestas para cada tipo de estímulo a través de los aproximadamente 300 ensayos por condición. Un aspecto notable es la distribución temporal de los errores. En los ensayos Go, los escasos errores (omisiones) aparecen distribuidos de manera relativamente uniforme a lo largo del experimento, sugiriendo lapsos atencionales ocasionales más que un patrón sistemático de fatiga o aprendizaje. Por el contrario, las falsas alarmas en los ensayos No-Go muestran una distribución más variable, con períodos de inhibición exitosa alternando con rachas de errores, particularmente en la condición lenta.
 
@@ -2650,3 +2652,39 @@ Para probar la doble disociación, se compararán modelos que incluyan solo las 
 ## Consideraciones Éticas y Prácticas
 
 El protocolo experimental será revisado y aprobado por el comité de ética institucional correspondiente. Se asegurará que todos los procedimientos cumplan con las directrices para investigación con humanos. Los datos se anonimizarán y almacenarán de manera segura, con acceso limitado al equipo de investigación.
+
+# Repositorio GitHub
+
+Este código se replica autamáticamente con datos. El código completo de este análisis, incluyendo los modelos estadísticos, las visualizaciones y los diagnósticos, está disponible en el siguiente [repositorio GitHub](https://github.com/AmaruSimonAgueroJimenez/Neurociencia-DCCS/blob/main/docs/TrabajoFinal.qmd). De igual manera se puede acceder con el siguiente código QR.
+
+```{r}
+#| fig-height: 3
+#| fig-width: 3
+#| fig-align: center
+#| results: 'asis'
+# URL del repositorio
+repo_url <- "https://github.com/AmaruSimonAgueroJimenez/Neurociencia-DCCS/blob/main/docs/TrabajoFinal.qmd"
+
+# Generar código QR
+qr <- qr_code(repo_url)
+
+# Opción 1: Plot simple
+plot(qr)
+```
+
+El informe .pdf se encuentra en [esta dirección](http://github.com/AmaruSimonAgueroJimenez/Econometria-DCCS/blob/main/docs/Trabajo_Amaru_Aguero.pdf). De igual manera se puede acceder con el siguiente código QR.
+
+```{r}
+#| fig-height: 3
+#| fig-width: 3
+#| fig-align: center
+#| results: 'asis'
+# URL del repositorio
+repo_url <- "http://github.com/AmaruSimonAgueroJimenez/Econometria-DCCS/blob/main/docs/Trabajo_Amaru_Aguero.pdf"
+
+# Generar código QR
+qr <- qr_code(repo_url)
+
+# Opción 1: Plot simple
+plot(qr)
+```
