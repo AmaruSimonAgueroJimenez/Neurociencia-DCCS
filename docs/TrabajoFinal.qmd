@@ -214,8 +214,8 @@ process_task_files <- function(folder_path, task_name, speed) {
   pattern <- case_when(
     task_name == "ericsen" && speed == "lento"   ~ "Ericsen_FT_lentp?\\.log$",
     task_name == "ericsen" && speed == "rapido"  ~ "Ericsen_FT_rapidp?\\.log$",
-    task_name == "GoNoGo"  && speed == "lento"   ~ "gonogo_FZ2R\\.log$",
-    task_name == "GoNoGo"  && speed == "rapido"  ~ "gonogo_FZR\\.log$",
+    task_name == "GoNoGo"  && speed == "rapido"   ~ "gonogo_FZ2R\\.log$",
+    task_name == "GoNoGo"  && speed == "lento"  ~ "gonogo_FZR\\.log$",
     TRUE                                        ~ ""
   )
   
@@ -1949,11 +1949,11 @@ Los índices de eficiencia se construyeron según la metodología descrita, tran
 
 ### Resultados del Modelo de Correlación
 
-La Tabla 3 presenta los resultados del modelo de regresión bayesiana que examina la relación entre eficiencias. El intercepto del modelo fue 1.479 (SE = 1.035, IC 95%: -0.625 - 3.454), representando el nivel esperado de eficiencia Go/No-Go cuando la eficiencia Flanker es cero. El coeficiente crítico que prueba la hipótesis principal fue -0.468 (SE = 0.878, IC 95%: -2.176 - 1.290).
+La Tabla 3 presenta los resultados del modelo de regresión bayesiana que examina la relación entre eficiencias. El intercepto del modelo fue 1.479 (SE = 1.035, IC 95%: -0.625 - 3.454), representando el nivel esperado de eficiencia Go/No-Go cuando la eficiencia Flanker es cero. El coeficiente crítico que prueba la hipótesis principal fue 0.103 (SE = 0.118, IC 95%: -0.132 - 0.337).
 
-Contrario a la predicción de la hipótesis, este coeficiente no solo no es significativamente positivo, sino que muestra una tendencia negativa. El amplio intervalo de credibilidad que incluye tanto valores positivos como negativos indica incertidumbre sustancial sobre la dirección y magnitud de cualquier relación. La probabilidad posterior de que el coeficiente sea positivo es aproximadamente 0.30, proporcionando evidencia en contra de la hipótesis de correlación positiva.
+Contrario a la predicción de la hipótesis, este coeficiente es positivo pero estadisticamente no significativo. El amplio intervalo de credibilidad que incluye tanto valores positivos como negativos indica incertidumbre sobre la dirección y magnitud de cualquier relación.
 
-La Figura 13 confirma estos resultados estadísticos. Los puntos están dispersos sin un patrón claro, y la línea de regresión muestra una pendiente ligeramente negativa con amplios intervalos de incertidumbre. Algunos participantes (como 7 y 12) muestran alta eficiencia en Flanker pero baja en Go/No-Go, mientras que otros (como 15) muestran el patrón opuesto. Esta falta de correspondencia sistemática sugiere que las capacidades medidas por cada tarea son largamente independientes.
+La Figura 13 confirma estos resultados estadísticos. Los puntos están dispersos sin un patrón claro, y la línea de regresión muestra una pendiente ligeramente positiva con amplios intervalos de incertidumbre. Algunos participantes (como 16, 19 y 22) muestran alta eficienca en Flanker pero baja en Go/No-Go, mientras que otros (como 6 y 23) muestran el patrón opuesto. Esta falta de correspondencia sistemática sugiere que las capacidades medidas por cada tarea son largamente independientes.
 
 ## Patrones Adicionales en los Datos
 
