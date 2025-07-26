@@ -139,7 +139,8 @@ complete_data <- bind_rows(data_fast, data_slow) %>%
         correct_answer,
         RT_ms,
         trial_type,
-        task
+        task,
+        Trial
     ) %>%
     rename(
         response = correct_answer,
